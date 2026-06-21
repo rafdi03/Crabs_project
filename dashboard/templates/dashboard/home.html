@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Monitoring Tambak</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light"> <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#">🌊 AquaTronics Dashboard</a>
+            
+            <form action="{% url 'logout' %}" method="post" class="d-flex">
+                {% csrf_token %}
+                <button class="btn btn-danger btn-sm" type="submit">Logout Keluar</button>
+            </form>
+        </div>
+    </nav>
+
+    <div class="container mt-5"> <div class="row mb-4">
+            <div class="col-12">
+                <h2 class="fw-bold">Pilih Lokasi Tambak</h2>
+                <p class="text-muted">Pilih area pantau untuk melihat data sensor perangkat ESP32 secara detail.</p>
+            </div>
+        </div>
+
+        <div class="row">
+            {% for lokasi in daftar_lokasi %}
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100 shadow-sm border-0">
+                        <div class="card-body">
+                            <h5 class="card-title text-primary fw-bold">📍 {{ lokasi.nama_daerah }}</h5>
+                            <p class="card-text text-secondary">{{ lokasi.keterangan }}</p>
+                        </div>
+                        <div class="card-footer bg-white border-0 pb-3">
+                            <a href="{% url 'detail_lokasi' lokasi.id %}" class="btn btn-outline-primary w-100">
+                                Buka Dashboard Area
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="col-12">
+                    <div class="alert alert-warning" role="alert">
+                        Belum ada lokasi tambak yang terdaftar di sistem.
+                    </div>
+                </div>
+            {% endfor %}
+            </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
