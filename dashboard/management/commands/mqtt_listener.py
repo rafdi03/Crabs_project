@@ -12,6 +12,8 @@ from django.core.management.base import BaseCommand
 from dashboard.models import Alat, DataSensor
 import paho.mqtt.client as mqtt
 import certifi 
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):
     help = 'Production MQTT Listener v3.0 - Thread-Safe & Cross-Platform'
@@ -122,6 +124,58 @@ class Command(BaseCommand):
                         )
                         
                         cache.set(cache_key, timezone.now(), self.RATE_LIMIT_SECONDS)
+                        suhu_val = payload.get('suhu_air', 0.0)
+                        do_val = payload.get('do', 0.0)
+
+                        # 1. Evaluasi Suhu (Bobot 2)
+                        if 25 <= suhu_val <= 35:
+                            skor_suhu = 5; css_suhu = "success"
+                        elif 20 <= suhu_val < 25:
+                            skor_suhu = 3; css_suhu = "warning"
+                        else:
+                            skor_suhu = 1; css_suhu = "danger"
+
+                        # 2. Evaluasi DO (Bobot 2)
+                        if do_val > 4:
+                            skor_do = 5; css_do = "success"
+                        elif 3 <= do_val <= 4:
+                            skor_do = 3; css_do = "warning"
+                        else:
+                            skor_do = 1; css_do = "danger"
+
+                        # 3. Kalkulasi Status Tambak Keseluruhan
+                        total_skor = (skor_suhu * 2) + (skor_do * 2)
+                        
+                        if total_skor >= 16:
+                            status_tambak = "KONDISI PRIMA (AMAN)"
+                            badge_color = "bg-success"
+                        elif total_skor >= 10:
+                            status_tambak = "WASPADA (SEDANG)"
+                            badge_color = "bg-warning text-dark"
+                        else:
+                            status_tambak = "KRITIS (BAHAYA)"
+                            badge_color = "bg-danger"
+
+                        # Broadcast data ke WebSockets
+                        channel_layer = get_channel_layer()
+                        async_to_sync(channel_layer.group_send)(
+                            'sensor_data',
+                            {
+                                'type': 'send_sensor_data',
+                                'data': {
+                                    'id_alat': device_id,
+                                    'do': do_val,
+                                    'do_css': css_do,
+                                    'suhu_air': suhu_val,
+                                    'suhu_css': css_suhu,
+                                    'tds': payload.get('tds', 0.0),
+                                    'jsn': payload.get('jsn', 0.0),
+                                    'suhu_lingkungan': payload.get('suhu_lingkungan', 0.0),
+                                    'status_tambak': status_tambak,
+                                    'badge_color': badge_color
+                                }
+                            }
+                        )
                         self.stdout.write(self.style.SUCCESS(f"✅ [{device_id}] Saved"))
                         saved = True
                         break

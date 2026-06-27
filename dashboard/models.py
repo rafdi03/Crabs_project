@@ -27,7 +27,7 @@ class Alat(models.Model):
 # 3. Tabel Data Sensor
 class DataSensor(models.Model):
     alat = models.ForeignKey(Alat, on_delete=models.CASCADE, related_name='data_sensor')
-    timestamp = models.DateTimeField(auto_now_add=True) # Waktu data masuk otomatis
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True) 
     
     # Data dari Sensor Air
     do_level = models.FloatField(verbose_name="Dissolved Oxygen (mg/L)")

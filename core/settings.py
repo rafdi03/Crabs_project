@@ -31,6 +31,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne', 
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -38,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'dashboard',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -68,7 +70,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
-
+ASGI_APPLICATION = 'core.asgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -99,7 +101,14 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": ["rediss://default:gQAAAAAAAdVLAAIgcDJkMjIzYTRlNDVhNGE0Nzg4YmNlMjJkYjY5MjI0ZDU3Ng@new-tapir-120139.upstash.io:6379"], 
+        },
+    },
+}
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
