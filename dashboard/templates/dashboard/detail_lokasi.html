@@ -4,537 +4,1124 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard Analitik Tambak - {{ lokasi.nama_daerah }}</title>
+    <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
     <style>
-        .sensor-box { transition: all 0.3s ease; border-width: 2px !important; }
-        @media (max-width: 576px) {
-            .sensor-box h3 { font-size: 1.5rem; }
-            .sensor-box small { font-size: 0.75rem; }
+        /* ===== RESET & GLOBAL ===== */
+        * {
+            box-sizing: border-box;
         }
-        .table-wrapper { max-height: 250px; overflow-y: auto; overflow-x: auto; }
-        .table-wrapper thead th { position: sticky; top: 0; background-color: #f8f9fa; z-index: 1; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
-        .nav-tabs .nav-link { color: #495057; font-weight: 500; }
-        .nav-tabs .nav-link.active { color: #0d6efd; font-weight: 600; }
+        body {
+            background: #f0f4f9;
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            color: #1a2634;
+            padding-bottom: 2rem;
+        }
+        /* ===== NAVBAR ===== */
+        .navbar-custom {
+            background: linear-gradient(135deg, #0b2a4a 0%, #1a4b6d 100%);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 0.7rem 0;
+        }
+        .navbar-custom .navbar-brand {
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            font-size: 1.6rem;
+            color: #fff;
+        }
+        .navbar-custom .navbar-brand i {
+            font-size: 1.8rem;
+            margin-right: 6px;
+            color: #7ec8e3;
+        }
+        .navbar-custom .btn-outline-light {
+            border-width: 2px;
+            border-radius: 30px;
+            padding: 0.4rem 1.4rem;
+            font-weight: 500;
+            transition: all 0.25s;
+        }
+        .navbar-custom .btn-outline-light:hover {
+            background: rgba(255,255,255,0.15);
+            transform: translateY(-1px);
+        }
+        /* ===== PAGE HEADER ===== */
+        .page-header {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 1.6rem 2rem;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.04);
+            margin-bottom: 2.2rem;
+            border: 1px solid rgba(0,0,0,0.02);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .page-header h2 {
+            font-weight: 700;
+            font-size: 2rem;
+            color: #0b2a4a;
+            margin: 0;
+        }
+        .page-header h2 i {
+            color: #0d6efd;
+            margin-right: 0.5rem;
+        }
+        .page-header .subtitle {
+            color: #6c7a8a;
+            font-size: 0.95rem;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .btn-download {
+            background: #0d6efd;
+            border: none;
+            border-radius: 40px;
+            padding: 0.65rem 2rem;
+            font-weight: 600;
+            color: white;
+            box-shadow: 0 4px 14px rgba(13,110,253,0.3);
+            transition: all 0.25s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-download:hover {
+            background: #0b5ed7;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 22px rgba(13,110,253,0.35);
+            color: white;
+        }
+        /* ===== CARD ALAT ===== */
+        .card-alat {
+            border: none;
+            border-radius: 24px;
+            overflow: hidden;
+            background: #ffffff;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.05);
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            margin-bottom: 2.5rem;
+        }
+        .card-alat:hover {
+            box-shadow: 0 16px 48px rgba(0,0,0,0.08);
+            transform: translateY(-4px);
+        }
+        .card-header-alat {
+            background: linear-gradient(135deg, #0b2a4a 0%, #1a4b6d 100%);
+            padding: 1rem 1.8rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #0d6efd;
+        }
+        .card-header-alat h5 {
+            font-weight: 700;
+            margin: 0;
+            font-size: 1.2rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .card-header-alat h5 i {
+            font-size: 1.4rem;
+            color: #7ec8e3;
+        }
+        .badge-id {
+            background: rgba(255,255,255,0.18);
+            backdrop-filter: blur(4px);
+            padding: 0.3rem 1rem;
+            border-radius: 30px;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .badge-status {
+            padding: 0.35rem 1.2rem;
+            border-radius: 40px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            background: #6c757d;
+            color: white;
+            transition: all 0.3s;
+            display: inline-block;
+        }
+        .badge-status.online {
+            background: #198754;
+        }
+        .badge-status.warning {
+            background: #ffc107;
+            color: #212529;
+        }
+        .badge-status.danger {
+            background: #dc3545;
+        }
+        /* ===== TIMESTAMP ===== */
+        .timestamp-badge {
+            background: #f1f5f9;
+            border-radius: 40px;
+            padding: 0.3rem 1.2rem;
+            display: inline-block;
+            font-size: 0.85rem;
+            color: #2c3e50;
+            margin-bottom: 1.5rem;
+            border: 1px solid #e9edf2;
+        }
+        .timestamp-badge i {
+            margin-right: 0.4rem;
+            color: #6c7a8a;
+        }
+        /* ===== SENSOR GRID ===== */
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .sensor-item {
+            background: #f8faff;
+            border-radius: 16px;
+            padding: 1rem 0.5rem;
+            text-align: center;
+            border: 1px solid rgba(0,0,0,0.03);
+            transition: all 0.25s ease;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+            position: relative;
+            overflow: hidden;
+        }
+        .sensor-item::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 4px;
+            width: 100%;
+            background: #0d6efd;
+            opacity: 0.3;
+            transition: opacity 0.3s;
+        }
+        .sensor-item:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+        }
+        .sensor-item .label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            color: #6c7a8a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.3rem;
+        }
+        .sensor-item .label i {
+            font-size: 0.9rem;
+        }
+        .sensor-item .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #0b2a4a;
+            line-height: 1.2;
+            margin: 0.2rem 0;
+            transition: all 0.2s;
+        }
+        .sensor-item .unit {
+            font-size: 0.75rem;
+            font-weight: 400;
+            color: #8a99a8;
+        }
+        /* Status warna sensor */
+        .sensor-item.status-good {
+            background: #eafaf1;
+            border-color: #a9dfbf;
+        }
+        .sensor-item.status-good::after {
+            background: #198754;
+            opacity: 0.6;
+        }
+        .sensor-item.status-warning {
+            background: #fef9e7;
+            border-color: #f9e79f;
+        }
+        .sensor-item.status-warning::after {
+            background: #ffc107;
+            opacity: 0.6;
+        }
+        .sensor-item.status-danger {
+            background: #fdedec;
+            border-color: #f5b7b1;
+        }
+        .sensor-item.status-danger::after {
+            background: #dc3545;
+            opacity: 0.6;
+        }
+        .sensor-item.status-info {
+            background: #eaf2f8;
+            border-color: #aed6f1;
+        }
+        .sensor-item.status-info::after {
+            background: #0dcaf0;
+            opacity: 0.4;
+        }
+        /* ===== CHART WRAPPER ===== */
+        .chart-wrapper {
+            background: white;
+            border-radius: 16px;
+            padding: 1rem 1rem 0.5rem;
+            border: 1px solid rgba(0,0,0,0.04);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+            transition: all 0.3s;
+            margin-bottom: 1.5rem;
+        }
+        .chart-wrapper:hover {
+            border-color: rgba(13,110,253,0.15);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.04);
+        }
+        .chart-wrapper h6 {
+            font-weight: 600;
+            color: #34495e;
+            font-size: 0.9rem;
+            margin-bottom: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .chart-wrapper h6 i {
+            font-size: 1.1rem;
+        }
+        .chart-container {
+            position: relative;
+            height: 220px;
+            width: 100%;
+        }
+        /* ===== TABEL ===== */
+        .table-wrapper {
+            max-height: 270px;
+            overflow-y: auto;
+            border-radius: 16px;
+            border: 1px solid rgba(0,0,0,0.04);
+        }
+        .table-wrapper table {
+            margin-bottom: 0;
+            font-size: 0.85rem;
+        }
+        .table-wrapper thead th {
+            position: sticky;
+            top: 0;
+            background: #f8faff;
+            color: #1a2634;
+            font-weight: 600;
+            border-bottom: 2px solid #e9edf2;
+            z-index: 2;
+            padding: 0.7rem 0.5rem;
+        }
+        .table-wrapper tbody td {
+            padding: 0.5rem 0.5rem;
+            vertical-align: middle;
+        }
+        .table-wrapper tbody tr:hover {
+            background: #f1f6fd;
+        }
+        /* ===== TABS ===== */
+        .nav-tabs .nav-link {
+            color: #4a5a6a;
+            font-weight: 500;
+            border: none;
+            border-bottom: 3px solid transparent;
+            padding: 0.6rem 1.2rem;
+            transition: all 0.25s;
+            font-size: 0.9rem;
+        }
+        .nav-tabs .nav-link i {
+            margin-right: 0.4rem;
+        }
+        .nav-tabs .nav-link:hover {
+            border-bottom-color: #adb5bd;
+            color: #0b2a4a;
+        }
+        .nav-tabs .nav-link.active {
+            color: #0d6efd;
+            background: transparent;
+            border-bottom-color: #0d6efd;
+            font-weight: 600;
+        }
+        .tab-content {
+            padding-top: 1.2rem;
+        }
+        /* ===== FILTER ===== */
+        .filter-row label {
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: #495057;
+            margin-bottom: 0.2rem;
+        }
+        .filter-row select, .filter-row input {
+            border-radius: 8px;
+            border: 1px solid #ced4da;
+            padding: 0.3rem 0.8rem;
+            font-size: 0.9rem;
+        }
+        .filter-row select:focus, .filter-row input:focus {
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
+            outline: none;
+        }
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            padding: 3rem 1rem;
+            text-align: center;
+            background: white;
+            border-radius: 24px;
+            border: 2px dashed #dce3ec;
+        }
+        .empty-state i {
+            font-size: 3.5rem;
+            color: #b0c0d0;
+            margin-bottom: 1rem;
+        }
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .sensor-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 0.7rem;
+            }
+            .sensor-item .value {
+                font-size: 1.6rem;
+            }
+            .page-header {
+                padding: 1.2rem;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+            .page-header h2 {
+                font-size: 1.6rem;
+            }
+            .card-header-alat {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+            .chart-container {
+                height: 180px;
+            }
+            .filter-row .col-auto {
+                width: 100%;
+            }
+            .filter-row select, .filter-row input {
+                width: 100%;
+            }
+        }
+        @media (max-width: 480px) {
+            .sensor-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .sensor-item .value {
+                font-size: 1.3rem;
+            }
+        }
+        /* ===== ANIMASI UPDATE ===== */
+        @keyframes valuePop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.12); color: #0d6efd; }
+            100% { transform: scale(1); }
+        }
+        .value-update {
+            animation: valuePop 0.3s ease;
+        }
+        /* Scrollbar kustom */
+        .table-wrapper::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .table-wrapper::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .table-wrapper::-webkit-scrollbar-thumb {
+            background: #c1c9d6;
+            border-radius: 10px;
+        }
+        .table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #a8b3c4;
+        }
     </style>
 </head>
-<body class="bg-light">
+<body>
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+    <!-- ===== NAVBAR ===== -->
+    <nav class="navbar navbar-expand-lg navbar-custom">
         <div class="container">
-            <a class="navbar-brand fw-bold text-info" href="#">🌊 Crabs aquasense</a>
-            <a href="{% url 'halaman_utama' %}" class="btn btn-outline-light btn-sm">&larr; Kembali</a>
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-water"></i> 🌊 Crabs aquasense
+            </a>
+            <a href="{% url 'halaman_utama' %}" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-arrow-left"></i> Kembali
+            </a>
         </div>
     </nav>
 
     <div class="container mt-4">
 
-        <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 border-bottom pb-3 gap-3">
+        <!-- ===== PAGE HEADER ===== -->
+        <div class="page-header">
             <div>
-                <h2 class="fw-bold mb-0">Area Pantau: <span class="text-info">{{ lokasi.nama_daerah }}</span></h2>
-                <p class="text-muted mb-0">Pemantauan kualitas air real-time & riwayat data historis.</p>
+                <h2><i class="bi bi-geo-alt-fill"></i> {{ lokasi.nama_daerah }}</h2>
+                <p class="subtitle"><i class="bi bi-clock-history"></i> Pemantauan real-time & historis</p>
             </div>
-            <a href="{% url 'download_csv_lokasi' lokasi.id %}" class="btn btn-success fw-bold px-4 py-2 rounded-pill shadow-sm w-100 w-md-auto text-center">
-                📥 Download Full CSV Area
+            <a href="{% url 'download_csv_lokasi' lokasi.id %}" class="btn-download">
+                <i class="bi bi-download"></i> CSV Area
             </a>
         </div>
 
+        <!-- ===== LOOP ALAT ===== -->
         {% for item in alat_data_list %}
-            <div class="card shadow border-0 mb-5 rounded-4 overflow-hidden">
-                <!-- Header Kartu -->
-                <div class="card-header bg-primary text-white pt-3 pb-2 px-4 d-flex flex-column flex-md-row justify-content-between">
-                    <h5 class="fw-bold mb-0">
-                        📡 {{ item.alat.nama_kolam }}
-                        <span id="status_{{ item.alat.id_alat }}" class="badge bg-secondary ms-2 fs-6 shadow-sm">Menghitung Status...</span>
-                    </h5>
-                    <span class="badge bg-light text-primary mt-2 mt-md-0 align-self-start align-self-md-center">ID: {{ item.alat.id_alat }}</span>
-                </div>
-
-                <div class="card-body p-3 p-md-4 bg-white">
-
-                    {% if item.sensor_terbaru %}
-                        <!-- Ada data sensor -->
-                        <p class="text-muted small mb-3">🕒 Data Real-Time Terakhir: <strong class="text-dark">{{ item.sensor_terbaru.timestamp }}</strong></p>
-
-                        <!-- Kotak Sensor -->
-                        <div class="row g-2 g-md-3 mb-4">
-                            <!-- DO -->
-                            <div class="col-6 col-lg">
-                                <div id="box_do_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center
-                                    {% if item.sensor_terbaru.do_level >= 4.0 %} bg-success bg-opacity-10 border-success
-                                    {% elif item.sensor_terbaru.do_level >= 3.0 %} bg-warning bg-opacity-10 border-warning
-                                    {% else %} bg-danger bg-opacity-10 border-danger {% endif %}">
-                                    <small class="text-muted fw-bold d-block mb-1">DO Level (mg/L)</small>
-                                    <h3 id="do_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-dark">{{ item.sensor_terbaru.do_level }}</h3>
-                                </div>
-                            </div>
-                            <!-- Suhu Air -->
-                            <div class="col-6 col-lg">
-                                <div id="box_suhu_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center
-                                    {% if item.sensor_terbaru.suhu_air >= 25.0 and item.sensor_terbaru.suhu_air <= 30.0 %} bg-success bg-opacity-10 border-success
-                                    {% elif item.sensor_terbaru.suhu_air >= 20.0 and item.sensor_terbaru.suhu_air <= 33.0 %} bg-warning bg-opacity-10 border-warning
-                                    {% else %} bg-danger bg-opacity-10 border-danger {% endif %}">
-                                    <small class="text-muted fw-bold d-block mb-1">Suhu Air (°C)</small>
-                                    <h3 id="suhu_air_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-dark">{{ item.sensor_terbaru.suhu_air }}</h3>
-                                </div>
-                            </div>
-                            <!-- TDS -->
-                            <div class="col-6 col-lg">
-                                <div id="box_tds_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center
-                                    {% if item.sensor_terbaru.tds_level <= 500 %} bg-success bg-opacity-10 border-success
-                                    {% elif item.sensor_terbaru.tds_level <= 800 %} bg-warning bg-opacity-10 border-warning
-                                    {% else %} bg-danger bg-opacity-10 border-danger {% endif %}">
-                                    <small class="text-muted fw-bold d-block mb-1">TDS (ppm)</small>
-                                    <h3 id="tds_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-dark">{{ item.sensor_terbaru.tds_level }}</h3>
-                                </div>
-                            </div>
-                            <!-- JSN -->
-                            <div class="col-6 col-lg">
-                                <div id="box_jsn_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center bg-info bg-opacity-10 border-info">
-                                    <small class="text-muted fw-bold d-block mb-1">Jarak JSN</small>
-                                    <h3 id="jsn_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-dark">{{ item.sensor_terbaru.jsn_distance }} <span class="fs-6">cm</span></h3>
-                                </div>
-                            </div>
-                            <!-- Suhu Udara -->
-                            <div class="col-12 col-lg">
-                                <div id="box_suhu_udara_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center bg-secondary bg-opacity-10 border-secondary">
-                                    <small class="text-muted fw-bold d-block mb-1">Suhu Udara</small>
-                                    <h3 id="suhu_lingkungan_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-dark">{{ item.sensor_terbaru.suhu_lingkungan }} <span class="fs-6">°C</span></h3>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tabs Grafik -->
-                        <ul class="nav nav-tabs" id="chartTab_{{ item.alat.id }}" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="realtime-tab-{{ item.alat.id }}" data-bs-toggle="tab" data-bs-target="#realtime-{{ item.alat.id }}" type="button" role="tab">📊 Real-time</button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="bulanan-tab-{{ item.alat.id }}" data-bs-toggle="tab" data-bs-target="#bulanan-{{ item.alat.id }}" type="button" role="tab">📅 Bulanan</button>
-                            </li>
-                        </ul>
-                        <div class="tab-content pt-3" id="chartTabContent_{{ item.alat.id }}">
-                            <!-- Real-time -->
-                            <div class="tab-pane fade show active" id="realtime-{{ item.alat.id }}" role="tabpanel">
-                                <div class="row mb-4">
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Tren Suhu Air & Udara</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="chartSuhu_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Tren Kualitas Air (DO & TDS)</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="chartKualitas_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <!-- Bulanan -->
-                            <div class="tab-pane fade" id="bulanan-{{ item.alat.id }}" role="tabpanel">
-                                <div class="row mb-4">
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Rata-rata Suhu Bulanan</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="chartBulananSuhu_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Rata-rata DO & TDS Bulanan</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="chartBulananKualitas_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tabel Riwayat -->
-                        <div class="border rounded-3 p-3 shadow-sm bg-white">
-                            <h6 class="fw-bold mb-3 text-secondary">📋 Tabel Riwayat Data Masuk (50 Terakhir)</h6>
-                            <div class="table-wrapper border rounded-2">
-                                <table class="table table-hover table-sm text-center align-middle mb-0" style="min-width: 600px;">
-                                    <thead>
-                                        <tr>
-                                            <th>Waktu</th>
-                                            <th>DO (mg/L)</th>
-                                            <th>Suhu Air (°C)</th>
-                                            <th>TDS (ppm)</th>
-                                            <th>Jarak JSN (cm)</th>
-                                            <th>Suhu Udara (°C)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for baris in item.tabel_riwayat %}
-                                        <tr>
-                                            <td class="text-muted text-nowrap">{{ baris.timestamp|date:"d M Y, H:i" }}</td>
-                                            <td>{{ baris.do_level }}</td>
-                                            <td>{{ baris.suhu_air }}</td>
-                                            <td>{{ baris.tds_level }}</td>
-                                            <td>{{ baris.jsn_distance }}</td>
-                                            <td>{{ baris.suhu_lingkungan }}</td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <!-- Script inisialisasi grafik -->
-                        <script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                // ---------- Grafik Real-time ----------
-                                const rawData = '{{ item.chart_data|escapejs }}';
-                                const chartData = JSON.parse(rawData);
-                                new Chart(document.getElementById('chartSuhu_{{ item.alat.id }}').getContext('2d'), {
-                                    type: 'line',
-                                    data: {
-                                        labels: chartData.waktu,
-                                        datasets: [
-                                            { label: 'Suhu Air', data: chartData.suhu_air, borderColor: '#dc3545', fill: true, tension: 0.4 },
-                                            { label: 'Suhu Udara', data: chartData.suhu_lingkungan, borderColor: '#198754', borderDash: [5, 5], tension: 0.4 }
-                                        ]
-                                    },
-                                    options: { responsive: true, maintainAspectRatio: false }
-                                });
-                                new Chart(document.getElementById('chartKualitas_{{ item.alat.id }}').getContext('2d'), {
-                                    type: 'line',
-                                    data: {
-                                        labels: chartData.waktu,
-                                        datasets: [
-                                            { label: 'DO', data: chartData.do, borderColor: '#0dcaf0', yAxisID: 'y' },
-                                            { label: 'TDS', data: chartData.tds, borderColor: '#ffc107', yAxisID: 'y1' }
-                                        ]
-                                    },
-                                    options: {
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        scales: { y: { position: 'left' }, y1: { position: 'right' } }
-                                    }
-                                });
-
-                                // ---------- Grafik Bulanan ----------
-                                let bulananInited = false;
-
-                                function initBulananChart() {
-                                    if (bulananInited) return;
-                                    const ctxSuhu = document.getElementById('chartBulananSuhu_{{ item.alat.id }}');
-                                    const ctxKualitas = document.getElementById('chartBulananKualitas_{{ item.alat.id }}');
-                                    if (!ctxSuhu || !ctxKualitas) return;
-
-                                    fetch('/api/chart-bulanan/{{ item.alat.id_alat }}/')
-                                        .then(response => {
-                                            if (!response.ok) throw new Error('Gagal mengambil data');
-                                            return response.json();
-                                        })
-                                        .then(data => {
-                                            if (data.labels.length === 0) {
-                                                new Chart(ctxSuhu, {
-                                                    type: 'line',
-                                                    data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
-                                                    options: { responsive: true, maintainAspectRatio: false }
-                                                });
-                                                new Chart(ctxKualitas, {
-                                                    type: 'line',
-                                                    data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
-                                                    options: { responsive: true, maintainAspectRatio: false }
-                                                });
-                                                bulananInited = true;
-                                                return;
-                                            }
-                                            new Chart(ctxSuhu, {
-                                                type: 'line',
-                                                data: {
-                                                    labels: data.labels,
-                                                    datasets: [
-                                                        { label: 'Rata-rata Suhu Air', data: data.suhu_air, borderColor: '#dc3545', fill: true, tension: 0.4 },
-                                                        { label: 'Rata-rata Suhu Udara', data: data.suhu_lingkungan, borderColor: '#198754', borderDash: [5,5], tension: 0.4 }
-                                                    ]
-                                                },
-                                                options: { responsive: true, maintainAspectRatio: false }
-                                            });
-                                            new Chart(ctxKualitas, {
-                                                type: 'line',
-                                                data: {
-                                                    labels: data.labels,
-                                                    datasets: [
-                                                        { label: 'Rata-rata DO', data: data.do, borderColor: '#0dcaf0', yAxisID: 'y' },
-                                                        { label: 'Rata-rata TDS', data: data.tds, borderColor: '#ffc107', yAxisID: 'y1' }
-                                                    ]
-                                                },
-                                                options: {
-                                                    responsive: true,
-                                                    maintainAspectRatio: false,
-                                                    scales: { y: { position: 'left' }, y1: { position: 'right' } }
-                                                }
-                                            });
-                                            bulananInited = true;
-                                        })
-                                        .catch(error => {
-                                            console.error('Error:', error);
-                                            new Chart(ctxSuhu, {
-                                                type: 'line',
-                                                data: { labels: ['Error'], datasets: [{ label: 'Gagal memuat', data: [0], borderColor: '#dc3545' }] },
-                                                options: { responsive: true, maintainAspectRatio: false }
-                                            });
-                                            new Chart(ctxKualitas, {
-                                                type: 'line',
-                                                data: { labels: ['Error'], datasets: [{ label: 'Gagal memuat', data: [0], borderColor: '#dc3545' }] },
-                                                options: { responsive: true, maintainAspectRatio: false }
-                                            });
-                                            bulananInited = true;
-                                        });
-                                }
-
-                                const bulananTab = document.getElementById('bulanan-tab-{{ item.alat.id }}');
-                                if (bulananTab) {
-                                    bulananTab.addEventListener('shown.bs.tab', initBulananChart);
-                                }
-
-                                // ---------- Simpan tab aktif ----------
-                                const tabsContainer = document.getElementById('chartTab_{{ item.alat.id }}');
-                                if (tabsContainer) {
-                                    const tabButtons = tabsContainer.querySelectorAll('[data-bs-toggle="tab"]');
-                                    tabButtons.forEach(btn => {
-                                        btn.addEventListener('shown.bs.tab', function(e) {
-                                            const target = e.target.getAttribute('data-bs-target');
-                                            sessionStorage.setItem('activeTab_{{ item.alat.id }}', target);
-                                        });
-                                    });
-                                    const savedTab = sessionStorage.getItem('activeTab_{{ item.alat.id }}');
-                                    if (savedTab) {
-                                        const targetBtn = tabsContainer.querySelector('[data-bs-target="' + savedTab + '"]');
-                                        if (targetBtn) {
-                                            const tab = new bootstrap.Tab(targetBtn);
-                                            tab.show();
-                                            sessionStorage.removeItem('activeTab_{{ item.alat.id }}');
-                                        }
-                                    }
-                                }
-                            });
-                        </script>
-
-                    {% else %}
-                        <!-- TIDAK ADA DATA SENSOR -->
-                        <p class="text-muted small mb-3">🕒 Data Real-Time Terakhir: <strong class="text-warning">Standby (Menunggu Hardware)</strong></p>
-
-                        <div class="row g-2 g-md-3 mb-4 opacity-75">
-                            <!-- DO placeholder -->
-                            <div class="col-6 col-lg">
-                                <div id="box_do_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 bg-light border-secondary shadow-sm text-center">
-                                    <small class="text-muted fw-bold d-block mb-1">DO Level (mg/L)</small>
-                                    <h3 id="do_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-secondary">0.0</h3>
-                                </div>
-                            </div>
-                            <!-- Suhu Air placeholder -->
-                            <div class="col-6 col-lg">
-                                <div id="box_suhu_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 bg-light border-secondary shadow-sm text-center">
-                                    <small class="text-muted fw-bold d-block mb-1">Suhu Air (°C)</small>
-                                    <h3 id="suhu_air_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-secondary">0.0</h3>
-                                </div>
-                            </div>
-                            <!-- TDS placeholder -->
-                            <div class="col-6 col-lg">
-                                <div id="box_tds_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 bg-light border-secondary shadow-sm text-center">
-                                    <small class="text-muted fw-bold d-block mb-1">TDS (ppm)</small>
-                                    <h3 id="tds_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-secondary">0</h3>
-                                </div>
-                            </div>
-                            <!-- JSN placeholder -->
-                            <div class="col-6 col-lg">
-                                <div id="box_jsn_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 bg-light border-secondary shadow-sm text-center">
-                                    <small class="text-muted fw-bold d-block mb-1">Jarak JSN</small>
-                                    <h3 id="jsn_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-secondary">0.0 <span class="fs-6">cm</span></h3>
-                                </div>
-                            </div>
-                            <!-- Suhu Udara placeholder -->
-                            <div class="col-12 col-lg">
-                                <div id="box_suhu_udara_{{ item.alat.id_alat }}" class="sensor-box p-2 p-md-3 border rounded-3 bg-light border-secondary shadow-sm text-center">
-                                    <small class="text-muted fw-bold d-block mb-1">Suhu Udara</small>
-                                    <h3 id="suhu_lingkungan_{{ item.alat.id_alat }}" class="fw-bold mb-0 text-secondary">0.0 <span class="fs-6">°C</span></h3>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tabs grafik (mockup) -->
-                        <ul class="nav nav-tabs" id="chartTabMock_{{ item.alat.id }}" role="tablist">
-                            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#realtimeMock-{{ item.alat.id }}">📊 Real-time</button></li>
-                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#bulananMock-{{ item.alat.id }}">📅 Bulanan</button></li>
-                        </ul>
-                        <div class="tab-content pt-3">
-                            <div class="tab-pane fade show active" id="realtimeMock-{{ item.alat.id }}">
-                                <div class="row mb-4 opacity-75">
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Tren Suhu (Preview)</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="mockupChartSuhu_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Tren Kualitas (Preview)</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="mockupChartKualitas_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="tab-pane fade" id="bulananMock-{{ item.alat.id }}">
-                                <div class="row mb-4 opacity-75">
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Rata-rata Suhu (Preview)</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="mockupBulananSuhu_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <div class="border p-2 p-md-3 rounded-3 shadow-sm bg-white">
-                                            <h6 class="text-center text-muted fw-bold mb-3">📈 Rata-rata Kualitas (Preview)</h6>
-                                            <div style="position: relative; height: 250px; width: 100%;">
-                                                <canvas id="mockupBulananKualitas_{{ item.alat.id }}"></canvas>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tabel mockup -->
-                        <div class="border rounded-3 p-3 shadow-sm bg-white opacity-75">
-                            <h6 class="fw-bold mb-3 text-secondary">📋 Tabel Riwayat Data Masuk (Preview)</h6>
-                            <div class="table-wrapper border rounded-2">
-                                <table class="table table-sm text-center align-middle mb-0" style="min-width: 600px;">
-                                    <thead><tr><th>Waktu</th><th>DO</th><th>Suhu Air</th><th>TDS</th><th>Jarak JSN</th><th>Suhu Udara</th></tr></thead>
-                                    <tbody>
-                                        <tr><td class="text-muted text-nowrap">YYYY-MM-DD HH:MM</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-                                        <tr><td class="text-muted text-nowrap">YYYY-MM-DD HH:MM</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-                                        <tr><td class="text-muted text-nowrap">YYYY-MM-DD HH:MM</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-                                        <tr><td class="text-muted text-nowrap">YYYY-MM-DD HH:MM</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-                                        <tr><td class="text-muted text-nowrap">YYYY-MM-DD HH:MM</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                // Mockup charts untuk kondisi tanpa data
-                                new Chart(document.getElementById('mockupChartSuhu_{{ item.alat.id }}').getContext('2d'), {
-                                    type: 'line',
-                                    data: { labels: ['-','-','-'], datasets: [{ label: 'Menunggu Data', data: [0,0,0], borderColor: '#ccc' }] },
-                                    options: { responsive: true, maintainAspectRatio: false }
-                                });
-                                new Chart(document.getElementById('mockupChartKualitas_{{ item.alat.id }}').getContext('2d'), {
-                                    type: 'line',
-                                    data: { labels: ['-','-','-'], datasets: [{ label: 'Menunggu Data', data: [0,0,0], borderColor: '#ccc' }] },
-                                    options: { responsive: true, maintainAspectRatio: false }
-                                });
-                                // Mockup bulanan
-                                const ctxBS = document.getElementById('mockupBulananSuhu_{{ item.alat.id }}');
-                                const ctxBK = document.getElementById('mockupBulananKualitas_{{ item.alat.id }}');
-                                if (ctxBS && ctxBK) {
-                                    const labels = [];
-                                    for (let i = 29; i >= 0; i--) {
-                                        const d = new Date();
-                                        d.setDate(d.getDate() - i);
-                                        labels.push(d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }));
-                                    }
-                                    new Chart(ctxBS, {
-                                        type: 'line',
-                                        data: { labels: labels, datasets: [{ label: 'Data dummy', data: labels.map(() => (Math.random()*10+20).toFixed(1)), borderColor: '#ccc', borderDash: [5,5] }] },
-                                        options: { responsive: true, maintainAspectRatio: false }
-                                    });
-                                    new Chart(ctxBK, {
-                                        type: 'line',
-                                        data: { labels: labels, datasets: [{ label: 'Data dummy', data: labels.map(() => (Math.random()*3+2).toFixed(1)), borderColor: '#ccc', borderDash: [5,5] }] },
-                                        options: { responsive: true, maintainAspectRatio: false }
-                                    });
-                                }
-                            });
-                        </script>
-                    {% endif %}
-
-                </div> <!-- /card-body -->
-            </div> <!-- /card -->
-        {% empty %}
-            <div class="text-center py-5 bg-white border rounded-4 shadow-sm">
-                <h3 class="fw-bold text-secondary">Area Belum Dikonfigurasi</h3>
-                <p class="text-muted">Silakan tambahkan perangkat hardware (ESP32) di area ini melalui Panel Admin.</p>
+        <div class="card-alat" id="card-{{ item.alat.id_alat }}">
+            <!-- Header -->
+            <div class="card-header-alat">
+                <h5>
+                    <i class="bi bi-hdd-stack"></i> {{ item.alat.nama_kolam }}
+                    <span id="status_{{ item.alat.id_alat }}" class="badge-status">Menghitung...</span>
+                </h5>
+                <span class="badge-id"><i class="bi bi-tag me-1"></i> ID: {{ item.alat.id_alat }}</span>
             </div>
+
+            <div class="card-body p-3 p-md-4">
+
+                {% if item.sensor_terbaru %}
+                    <!-- ===== KONDISI ADA DATA ===== -->
+                    <!-- Timestamp -->
+                    <div class="timestamp-badge">
+                        <i class="bi bi-clock"></i> Terakhir: <strong>{{ item.sensor_terbaru.timestamp }}</strong>
+                    </div>
+
+                    <!-- Sensor Grid -->
+                    <div class="sensor-grid">
+                        <!-- DO -->
+                        <div id="box_do_{{ item.alat.id_alat }}" class="sensor-item
+                            {% if item.sensor_terbaru.do_level >= 4.0 %}status-good
+                            {% elif item.sensor_terbaru.do_level >= 3.0 %}status-warning
+                            {% else %}status-danger{% endif %}">
+                            <div class="label"><i class="bi bi-droplet"></i> DO</div>
+                            <div class="value" id="do_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.do_level }}</div>
+                            <div class="unit">mg/L</div>
+                        </div>
+                        <!-- Suhu Air -->
+                        <div id="box_suhu_{{ item.alat.id_alat }}" class="sensor-item
+                            {% if item.sensor_terbaru.suhu_air >= 25 and item.sensor_terbaru.suhu_air <= 30 %}status-good
+                            {% elif item.sensor_terbaru.suhu_air >= 20 and item.sensor_terbaru.suhu_air <= 33 %}status-warning
+                            {% else %}status-danger{% endif %}">
+                            <div class="label"><i class="bi bi-thermometer-half"></i> Suhu Air</div>
+                            <div class="value" id="suhu_air_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.suhu_air }}</div>
+                            <div class="unit">°C</div>
+                        </div>
+                        <!-- TDS -->
+                        <div id="box_tds_{{ item.alat.id_alat }}" class="sensor-item
+                            {% if item.sensor_terbaru.tds_level <= 500 %}status-good
+                            {% elif item.sensor_terbaru.tds_level <= 800 %}status-warning
+                            {% else %}status-danger{% endif %}">
+                            <div class="label"><i class="bi bi-water"></i> TDS</div>
+                            <div class="value" id="tds_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.tds_level }}</div>
+                            <div class="unit">ppm</div>
+                        </div>
+                        <!-- JSN -->
+                        <div id="box_jsn_{{ item.alat.id_alat }}" class="sensor-item status-info">
+                            <div class="label"><i class="bi bi-rulers"></i> JSN</div>
+                            <div class="value" id="jsn_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.jsn_distance }}</div>
+                            <div class="unit">cm</div>
+                        </div>
+                        <!-- Suhu Udara -->
+                        <div id="box_suhu_udara_{{ item.alat.id_alat }}" class="sensor-item status-info">
+                            <div class="label"><i class="bi bi-thermometer-sun"></i> Suhu Udara</div>
+                            <div class="value" id="suhu_lingkungan_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.suhu_lingkungan }}</div>
+                            <div class="unit">°C</div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs Charts -->
+                    <ul class="nav nav-tabs" id="chartTab_{{ item.alat.id_alat }}" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="realtime-tab-{{ item.alat.id_alat }}" data-bs-toggle="tab" data-bs-target="#realtime-{{ item.alat.id_alat }}" type="button" role="tab">
+                                <i class="bi bi-graph-up"></i> Real-time
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="riwayat-tab-{{ item.alat.id_alat }}" data-bs-toggle="tab" data-bs-target="#riwayat-{{ item.alat.id_alat }}" type="button" role="tab">
+                                <i class="bi bi-calendar3"></i> Riwayat
+                            </button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="chartTabContent_{{ item.alat.id_alat }}">
+                        <!-- Real-time -->
+                        <div class="tab-pane fade show active" id="realtime-{{ item.alat.id_alat }}" role="tabpanel">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="chart-wrapper">
+                                        <h6><i class="bi bi-thermometer-half text-danger"></i> Suhu Air & Udara</h6>
+                                        <div class="chart-container">
+                                            <canvas id="chartSuhu_{{ item.alat.id_alat }}"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="chart-wrapper">
+                                        <h6><i class="bi bi-droplet text-info"></i> DO & TDS</h6>
+                                        <div class="chart-container">
+                                            <canvas id="chartKualitas_{{ item.alat.id_alat }}"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tabel Riwayat Statis (tetap) -->
+                            <div class="mt-3">
+                                <h6 class="fw-bold text-secondary" style="font-size:0.95rem;"><i class="bi bi-table me-2"></i>Riwayat 50 data terakhir</h6>
+                                <div class="table-wrapper">
+                                    <table class="table table-hover align-middle">
+                                        <thead>
+                                            <tr>
+                                                <th>Waktu</th>
+                                                <th>DO</th>
+                                                <th>Suhu Air</th>
+                                                <th>TDS</th>
+                                                <th>JSN</th>
+                                                <th>Suhu Udara</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for baris in item.tabel_riwayat %}
+                                            <tr>
+                                                <td class="text-nowrap">{{ baris.timestamp|date:"d M Y, H:i" }}</td>
+                                                <td>{{ baris.do_level }}</td>
+                                                <td>{{ baris.suhu_air }}</td>
+                                                <td>{{ baris.tds_level }}</td>
+                                                <td>{{ baris.jsn_distance }}</td>
+                                                <td>{{ baris.suhu_lingkungan }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Riwayat -->
+                        <div class="tab-pane fade" id="riwayat-{{ item.alat.id_alat }}" role="tabpanel">
+                            <!-- Filter -->
+                            <div class="row g-2 align-items-end filter-row mb-3">
+                                <div class="col-auto">
+                                    <label class="form-label">Periode</label>
+                                    <select id="periodSelect_{{ item.alat.id_alat }}" class="form-select form-select-sm">
+                                        <option value="daily">Harian</option>
+                                        <option value="weekly">Mingguan</option>
+                                        <option value="monthly" selected>Bulanan</option>
+                                        <option value="yearly">Tahunan</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto" id="filterInputWrapper_{{ item.alat.id_alat }}">
+                                    <label class="form-label">Pilih</label>
+                                    <input type="month" id="filterInput_{{ item.alat.id_alat }}" class="form-control form-control-sm" value="{{ timezone.now|date:'Y-m' }}">
+                                </div>
+                                <div class="col-auto">
+                                    <button class="btn btn-primary btn-sm" id="applyFilterBtn_{{ item.alat.id_alat }}">
+                                        <i class="bi bi-search"></i> Tampilkan
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Grafik -->
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="chart-wrapper">
+                                        <h6><i class="bi bi-thermometer-half text-danger"></i> <span id="chartTitleSuhu_{{ item.alat.id_alat }}">Suhu</span></h6>
+                                        <div class="chart-container">
+                                            <canvas id="chartRiwayatSuhu_{{ item.alat.id_alat }}"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="chart-wrapper">
+                                        <h6><i class="bi bi-droplet text-info"></i> <span id="chartTitleKualitas_{{ item.alat.id_alat }}">DO & TDS</span></h6>
+                                        <div class="chart-container">
+                                            <canvas id="chartRiwayatKualitas_{{ item.alat.id_alat }}"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tabel Dinamis Riwayat (sinkron filter) -->
+                            <div class="mt-3">
+                                <h6 class="fw-bold text-secondary" style="font-size:0.95rem;">
+                                    <i class="bi bi-table me-2"></i>
+                                    <span id="riwayatTableTitle_{{ item.alat.id_alat }}">Data Riwayat</span>
+                                </h6>
+                                <div class="table-wrapper" id="riwayatTableWrapper_{{ item.alat.id_alat }}">
+                                    <table class="table table-hover align-middle" id="riwayatTable_{{ item.alat.id_alat }}">
+                                        <thead>
+                                            <tr>
+                                                <th>Waktu</th>
+                                                <th>DO (mg/L)</th>
+                                                <th>Suhu Air (°C)</th>
+                                                <th>TDS (ppm)</th>
+                                                <th>JSN (cm)</th>
+                                                <th>Suhu Udara (°C)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="riwayatTableBody_{{ item.alat.id_alat }}">
+                                            <tr><td colspan="6" class="text-muted text-center">Pilih periode dan klik Tampilkan</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Script Charts (versi dengan data) -->
+                    <script>
+                        (function() {
+                            const alatId = '{{ item.alat.id_alat }}';
+                            const rawData = '{{ item.chart_data|escapejs }}';
+                            const chartData = JSON.parse(rawData);
+
+                            // ========== REAL-TIME CHARTS ==========
+                            const ctxSuhu = document.getElementById('chartSuhu_' + alatId).getContext('2d');
+                            new Chart(ctxSuhu, {
+                                type: 'line',
+                                data: {
+                                    labels: chartData.waktu,
+                                    datasets: [
+                                        { label: 'Suhu Air', data: chartData.suhu_air, borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.05)', fill: true, tension: 0.4, pointRadius: 2 },
+                                        { label: 'Suhu Udara', data: chartData.suhu_lingkungan, borderColor: '#198754', borderDash: [5,5], tension: 0.4, pointRadius: 2 }
+                                    ]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } }
+                                }
+                            });
+
+                            const ctxKualitas = document.getElementById('chartKualitas_' + alatId).getContext('2d');
+                            new Chart(ctxKualitas, {
+                                type: 'line',
+                                data: {
+                                    labels: chartData.waktu,
+                                    datasets: [
+                                        { label: 'DO', data: chartData.do, borderColor: '#0dcaf0', yAxisID: 'y', tension: 0.4, pointRadius: 2 },
+                                        { label: 'TDS', data: chartData.tds, borderColor: '#ffc107', yAxisID: 'y1', tension: 0.4, pointRadius: 2 }
+                                    ]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                                    scales: {
+                                        y: { position: 'left', beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                                        y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
+                                        x: { grid: { display: false } }
+                                    }
+                                }
+                            });
+
+                            // ========== RIWAYAT CHARTS ==========
+                            let riwayatChartSuhu = null;
+                            let riwayatChartKualitas = null;
+
+                            function loadRiwayat(period, filterVal) {
+                                const ctxSuhu = document.getElementById('chartRiwayatSuhu_' + alatId);
+                                const ctxKualitas = document.getElementById('chartRiwayatKualitas_' + alatId);
+                                if (!ctxSuhu || !ctxKualitas) return;
+
+                                fetch('/api/chart-data/' + alatId + '/?period=' + period + '&filter=' + encodeURIComponent(filterVal))
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        if (riwayatChartSuhu) riwayatChartSuhu.destroy();
+                                        if (riwayatChartKualitas) riwayatChartKualitas.destroy();
+
+                                        if (data.labels && data.labels.length === 0) {
+                                            riwayatChartSuhu = new Chart(ctxSuhu, {
+                                                type: 'line',
+                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
+                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                            });
+                                            riwayatChartKualitas = new Chart(ctxKualitas, {
+                                                type: 'line',
+                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
+                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                            });
+                                            // Update tabel kosong
+                                            updateRiwayatTable([], period);
+                                            return;
+                                        }
+
+                                        // Untuk daily dan weekly (detail), titik disembunyikan
+                                        const isDetail = (period === 'daily' || period === 'weekly');
+                                        const pointRadius = isDetail ? 0 : 2;
+                                        const tension = isDetail ? 0.1 : 0.4;
+
+                                        // Update judul grafik
+                                        const titleMap = {
+                                            'daily': 'Harian',
+                                            'weekly': 'Mingguan',
+                                            'monthly': 'Bulanan',
+                                            'yearly': 'Tahunan'
+                                        };
+                                        document.getElementById('chartTitleSuhu_' + alatId).innerText = 'Suhu ' + (titleMap[period] || '');
+                                        document.getElementById('chartTitleKualitas_' + alatId).innerText = 'DO & TDS ' + (titleMap[period] || '');
+
+                                        // Maks ticks untuk sumbu X
+                                        let maxTicks = 20;
+                                        if (period === 'weekly') maxTicks = 30;
+                                        else if (period === 'daily') maxTicks = 15;
+
+                                        riwayatChartSuhu = new Chart(ctxSuhu, {
+                                            type: 'line',
+                                            data: {
+                                                labels: data.labels,
+                                                datasets: [
+                                                    { label: 'Suhu Air', data: data.suhu_air, borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.05)', fill: true, tension: tension, pointRadius: pointRadius },
+                                                    { label: 'Suhu Udara', data: data.suhu_lingkungan, borderColor: '#198754', borderDash: [5,5], fill: false, tension: tension, pointRadius: pointRadius }
+                                                ]
+                                            },
+                                            options: {
+                                                responsive: true,
+                                                maintainAspectRatio: false,
+                                                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                                                scales: {
+                                                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: maxTicks, autoSkip: true } }
+                                                }
+                                            }
+                                        });
+
+                                        riwayatChartKualitas = new Chart(ctxKualitas, {
+                                            type: 'line',
+                                            data: {
+                                                labels: data.labels,
+                                                datasets: [
+                                                    { label: 'DO', data: data.do, borderColor: '#0dcaf0', yAxisID: 'y', fill: false, tension: tension, pointRadius: pointRadius },
+                                                    { label: 'TDS', data: data.tds, borderColor: '#ffc107', yAxisID: 'y1', fill: false, tension: tension, pointRadius: pointRadius }
+                                                ]
+                                            },
+                                            options: {
+                                                responsive: true,
+                                                maintainAspectRatio: false,
+                                                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                                                scales: {
+                                                    y: { position: 'left', beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                                                    y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
+                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: maxTicks, autoSkip: true } }
+                                                }
+                                            }
+                                        });
+
+                                        // ========== UPDATE TABLE DINAMIS ==========
+                                        updateRiwayatTable(data, period);
+
+                                    })
+                                    .catch(err => {
+                                        console.error('Error loading riwayat:', err);
+                                        if (riwayatChartSuhu) riwayatChartSuhu.destroy();
+                                        if (riwayatChartKualitas) riwayatChartKualitas.destroy();
+                                        riwayatChartSuhu = new Chart(ctxSuhu, {
+                                            type: 'line',
+                                            data: { labels: ['Error'], datasets: [{ label: 'Gagal', data: [0], borderColor: '#dc3545' }] },
+                                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                        });
+                                        riwayatChartKualitas = new Chart(ctxKualitas, {
+                                            type: 'line',
+                                            data: { labels: ['Error'], datasets: [{ label: 'Gagal', data: [0], borderColor: '#dc3545' }] },
+                                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                        });
+                                        // Tabel error
+                                        const tableBody = document.getElementById('riwayatTableBody_' + alatId);
+                                        if (tableBody) {
+                                            tableBody.innerHTML = `<tr><td colspan="6" class="text-muted text-center">Error memuat data</td></tr>`;
+                                        }
+                                    });
+                            }
+
+                            // Fungsi untuk update tabel dinamis
+                            function updateRiwayatTable(data, period) {
+                                const tableBody = document.getElementById('riwayatTableBody_' + alatId);
+                                const tableTitle = document.getElementById('riwayatTableTitle_' + alatId);
+                                if (!tableBody) return;
+
+                                const titleMap = {
+                                    'daily': 'Data Harian',
+                                    'weekly': 'Data Mingguan (Rata-rata per Jam)',
+                                    'monthly': 'Data Bulanan (Rata-rata per Hari)',
+                                    'yearly': 'Data Tahunan (Rata-rata per Bulan)'
+                                };
+                                tableTitle.innerText = titleMap[period] || 'Data Riwayat';
+
+                                tableBody.innerHTML = '';
+                                if (data.labels && data.labels.length > 0) {
+                                    for (let i = 0; i < data.labels.length; i++) {
+                                        const row = document.createElement('tr');
+                                        row.innerHTML = `
+                                            <td class="text-nowrap">${data.labels[i]}</td>
+                                            <td>${data.do[i]}</td>
+                                            <td>${data.suhu_air[i]}</td>
+                                            <td>${data.tds[i]}</td>
+                                            <td>${data.jsn[i]}</td>
+                                            <td>${data.suhu_lingkungan[i]}</td>
+                                        `;
+                                        tableBody.appendChild(row);
+                                    }
+                                } else {
+                                    tableBody.innerHTML = `<tr><td colspan="6" class="text-muted text-center">Tidak ada data untuk periode ini</td></tr>`;
+                                }
+                            }
+
+                            // ========== FILTER LOGIC ==========
+                            const periodSelect = document.getElementById('periodSelect_' + alatId);
+                            const filterInput = document.getElementById('filterInput_' + alatId);
+                            const applyBtn = document.getElementById('applyFilterBtn_' + alatId);
+
+                            function updateFilterInput(period) {
+                                const wrapper = document.getElementById('filterInputWrapper_' + alatId);
+                                let inputHtml = '';
+                                const now = new Date();
+                                const year = now.getFullYear();
+                                const month = String(now.getMonth() + 1).padStart(2, '0');
+                                const day = String(now.getDate()).padStart(2, '0');
+
+                                if (period === 'daily') {
+                                    inputHtml = `<input type="date" id="filterInput_${alatId}" class="form-control form-control-sm" value="${year}-${month}-${day}">`;
+                                } else if (period === 'weekly') {
+                                    const week = getWeekNumber(now);
+                                    inputHtml = `<input type="week" id="filterInput_${alatId}" class="form-control form-control-sm" value="${year}-W${String(week).padStart(2, '0')}">`;
+                                } else if (period === 'monthly') {
+                                    inputHtml = `<input type="month" id="filterInput_${alatId}" class="form-control form-control-sm" value="${year}-${month}">`;
+                                } else if (period === 'yearly') {
+                                    inputHtml = `<input type="number" id="filterInput_${alatId}" class="form-control form-control-sm" value="${year}" min="2020" max="2030">`;
+                                }
+                                wrapper.innerHTML = inputHtml;
+                                document.getElementById('filterInput_' + alatId).addEventListener('keypress', function(e) {
+                                    if (e.key === 'Enter') applyFilter();
+                                });
+                            }
+
+                            function getWeekNumber(d) {
+                                d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                                d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+                                const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+                                const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+                                return weekNo;
+                            }
+
+                            function applyFilter() {
+                                const period = periodSelect.value;
+                                const filterVal = document.getElementById('filterInput_' + alatId).value;
+                                if (filterVal) {
+                                    loadRiwayat(period, filterVal);
+                                }
+                            }
+
+                            periodSelect.addEventListener('change', function() {
+                                updateFilterInput(this.value);
+                                const filterVal = document.getElementById('filterInput_' + alatId).value;
+                                if (filterVal) loadRiwayat(this.value, filterVal);
+                            });
+                            applyBtn.addEventListener('click', applyFilter);
+
+                            // ========== TAB INIT ==========
+                            const riwayatTab = document.getElementById('riwayat-tab-' + alatId);
+                            if (riwayatTab) {
+                                riwayatTab.addEventListener('shown.bs.tab', function() {
+                                    const period = periodSelect.value;
+                                    updateFilterInput(period);
+                                    const filterVal = document.getElementById('filterInput_' + alatId).value;
+                                    if (filterVal) loadRiwayat(period, filterVal);
+                                });
+                            }
+
+                            // ========== SAVE ACTIVE TAB ==========
+                            const tabContainer = document.getElementById('chartTab_' + alatId);
+                            if (tabContainer) {
+                                const btns = tabContainer.querySelectorAll('[data-bs-toggle="tab"]');
+                                btns.forEach(btn => {
+                                    btn.addEventListener('shown.bs.tab', function(e) {
+                                        sessionStorage.setItem('activeTab_' + alatId, e.target.getAttribute('data-bs-target'));
+                                    });
+                                });
+                                const saved = sessionStorage.getItem('activeTab_' + alatId);
+                                if (saved) {
+                                    const targetBtn = tabContainer.querySelector('[data-bs-target="' + saved + '"]');
+                                    if (targetBtn) {
+                                        new bootstrap.Tab(targetBtn).show();
+                                        sessionStorage.removeItem('activeTab_' + alatId);
+                                    }
+                                }
+                            }
+                        })();
+                    </script>
+
+                {% else %}
+                    <!-- ===== KONDISI TIDAK ADA DATA ===== -->
+                    <div class="timestamp-badge">
+                        <i class="bi bi-clock"></i> Status: <strong class="text-warning">Menunggu data dari hardware</strong>
+                    </div>
+
+                    <!-- Sensor Grid (placeholder) -->
+                    <div class="sensor-grid">
+                        <div class="sensor-item status-info"><div class="label"><i class="bi bi-droplet"></i> DO</div><div class="value">--</div><div class="unit">mg/L</div></div>
+                        <div class="sensor-item status-info"><div class="label"><i class="bi bi-thermometer-half"></i> Suhu Air</div><div class="value">--</div><div class="unit">°C</div></div>
+                        <div class="sensor-item status-info"><div class="label"><i class="bi bi-water"></i> TDS</div><div class="value">--</div><div class="unit">ppm</div></div>
+                        <div class="sensor-item status-info"><div class="label"><i class="bi bi-rulers"></i> JSN</div><div class="value">--</div><div class="unit">cm</div></div>
+                        <div class="sensor-item status-info"><div class="label"><i class="bi bi-thermometer-sun"></i> Suhu Udara</div><div class="value">--</div><div class="unit">°C</div></div>
+                    </div>
+
+                    <!-- Tabs mockup -->
+                    <ul class="nav nav-tabs">
+                        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#mockReal-{{ item.alat.id_alat }}"><i class="bi bi-graph-up"></i> Real-time</button></li>
+                        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#mockRiwayat-{{ item.alat.id_alat }}"><i class="bi bi-calendar3"></i> Riwayat</button></li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="mockReal-{{ item.alat.id_alat }}">
+                            <div class="row g-3 mt-1">
+                                <div class="col-md-6"><div class="chart-wrapper"><h6><i class="bi bi-thermometer-half text-danger"></i> Suhu (Preview)</h6><div class="chart-container"><canvas id="mockSuhu_{{ item.alat.id_alat }}"></canvas></div></div></div>
+                                <div class="col-md-6"><div class="chart-wrapper"><h6><i class="bi bi-droplet text-info"></i> Kualitas (Preview)</h6><div class="chart-container"><canvas id="mockKualitas_{{ item.alat.id_alat }}"></canvas></div></div></div>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="mockRiwayat-{{ item.alat.id_alat }}">
+                            <div class="row g-3 mt-1">
+                                <div class="col-md-6"><div class="chart-wrapper"><h6><i class="bi bi-thermometer-half text-danger"></i> Riwayat Suhu</h6><div class="chart-container"><canvas id="mockRiwayatSuhu_{{ item.alat.id_alat }}"></canvas></div></div></div>
+                                <div class="col-md-6"><div class="chart-wrapper"><h6><i class="bi bi-droplet text-info"></i> Riwayat Kualitas</h6><div class="chart-container"><canvas id="mockRiwayatKualitas_{{ item.alat.id_alat }}"></canvas></div></div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabel mockup -->
+                    <div class="mt-3">
+                        <h6 class="fw-bold text-secondary" style="font-size:0.95rem;"><i class="bi bi-table me-2"></i>Riwayat (Preview)</h6>
+                        <div class="table-wrapper">
+                            <table class="table table-hover align-middle">
+                                <thead><tr><th>Waktu</th><th>DO</th><th>Suhu Air</th><th>TDS</th><th>JSN</th><th>Suhu Udara</th></tr></thead>
+                                <tbody>
+                                    <tr><td colspan="6" class="text-muted text-center">Belum ada data</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Script mockup charts -->
+                    <script>
+                        (function() {
+                            const alatId = '{{ item.alat.id_alat }}';
+                            const makeMock = (id) => {
+                                const ctx = document.getElementById(id);
+                                if (ctx) {
+                                    new Chart(ctx, {
+                                        type: 'line',
+                                        data: { labels: ['-','-','-'], datasets: [{ label: 'Menunggu', data: [0,0,0], borderColor: '#ccc', borderDash: [4,4] }] },
+                                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                    });
+                                }
+                            };
+                            makeMock('mockSuhu_' + alatId);
+                            makeMock('mockKualitas_' + alatId);
+                            makeMock('mockRiwayatSuhu_' + alatId);
+                            makeMock('mockRiwayatKualitas_' + alatId);
+                        })();
+                    </script>
+                {% endif %}
+                <!-- ===== AKHIR KONDISI ADA/TIDAK ADA DATA ===== -->
+
+            </div> <!-- /card-body -->
+        </div> <!-- /card-alat -->
+        {% empty %}
+        <div class="empty-state">
+            <i class="bi bi-hdd-stack"></i>
+            <h5 class="fw-bold">Area Belum Dikonfigurasi</h5>
+            <p class="text-muted">Tambahkan perangkat ESP32 melalui Panel Admin untuk mulai memantau.</p>
+        </div>
         {% endfor %}
 
     </div> <!-- /container -->
 
-    <!-- ========== WEB SOCKET (di luar loop) ========== -->
+    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- WebSocket -->
     <script>
         function connectWebSocket() {
-            const sensorSocket = new WebSocket('ws://127.0.0.1:8000/ws/sensor/');
+            const socket = new WebSocket('ws://127.0.0.1:8000/ws/sensor/');
 
-            sensorSocket.onopen = function(e) {
+            socket.onopen = function() {
                 console.log('WebSocket terhubung.');
             };
 
-            sensorSocket.onmessage = function(e) {
+            socket.onmessage = function(e) {
                 const data = JSON.parse(e.data);
                 try {
-                    let elDo = document.getElementById('do_' + data.id_alat);
-                    if (elDo) elDo.innerText = data.do;
-
-                    let elSuhu = document.getElementById('suhu_air_' + data.id_alat);
-                    if (elSuhu) elSuhu.innerText = data.suhu_air;
-
-                    let elTds = document.getElementById('tds_' + data.id_alat);
-                    if (elTds) elTds.innerText = data.tds;
-
-                    let elJsn = document.getElementById('jsn_' + data.id_alat);
-                    if (elJsn) elJsn.innerText = data.jsn;
-
-                    let elSuhuUdara = document.getElementById('suhu_lingkungan_' + data.id_alat);
-                    if (elSuhuUdara) elSuhuUdara.innerText = data.suhu_lingkungan;
-
-                    let boxDo = document.getElementById('box_do_' + data.id_alat);
-                    if (boxDo) {
-                        boxDo.className = `sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center bg-${data.do_css} bg-opacity-10 border-${data.do_css}`;
+                    const id = data.id_alat;
+                    // Update nilai dengan animasi
+                    const map = {
+                        'do_': data.do,
+                        'suhu_air_': data.suhu_air,
+                        'tds_': data.tds,
+                        'jsn_': data.jsn,
+                        'suhu_lingkungan_': data.suhu_lingkungan
+                    };
+                    for (const [prefix, val] of Object.entries(map)) {
+                        const el = document.getElementById(prefix + id);
+                        if (el) {
+                            el.innerText = val;
+                            el.classList.remove('value-update');
+                            void el.offsetWidth;
+                            el.classList.add('value-update');
+                        }
                     }
 
-                    let boxSuhu = document.getElementById('box_suhu_' + data.id_alat);
-                    if (boxSuhu) {
-                        boxSuhu.className = `sensor-box p-2 p-md-3 border rounded-3 shadow-sm text-center bg-${data.suhu_css} bg-opacity-10 border-${data.suhu_css}`;
-                    }
-
-                    let statusBadge = document.getElementById('status_' + data.id_alat);
+                    // Status badge
+                    const statusBadge = document.getElementById('status_' + id);
                     if (statusBadge) {
                         statusBadge.innerText = data.status_tambak;
-                        statusBadge.className = `badge ${data.badge_color} ms-2 fs-6 shadow-sm`;
+                        statusBadge.className = 'badge-status ' + (data.badge_color === 'bg-success' ? 'online' : data.badge_color === 'bg-warning' ? 'warning' : data.badge_color === 'bg-danger' ? 'danger' : '');
                     }
 
-                } catch(error) {
-                    console.log("Elemen UI belum siap untuk:", data.id_alat, error);
+                    // Update warna box sensor
+                    const boxDo = document.getElementById('box_do_' + id);
+                    if (boxDo) {
+                        boxDo.className = 'sensor-item ' + (data.do_css === 'success' ? 'status-good' : data.do_css === 'warning' ? 'status-warning' : 'status-danger');
+                    }
+                    const boxSuhu = document.getElementById('box_suhu_' + id);
+                    if (boxSuhu) {
+                        boxSuhu.className = 'sensor-item ' + (data.suhu_css === 'success' ? 'status-good' : data.suhu_css === 'warning' ? 'status-warning' : 'status-danger');
+                    }
+                    const boxTds = document.getElementById('box_tds_' + id);
+                    if (boxTds) {
+                        boxTds.className = 'sensor-item ' + (data.tds_css === 'success' ? 'status-good' : data.tds_css === 'warning' ? 'status-warning' : 'status-danger');
+                    }
+                } catch(err) {
+                    console.warn('UI update error:', err);
                 }
             };
 
-            sensorSocket.onclose = function(e) {
-                console.error('WebSocket terputus. Mencoba reconnect dalam 3 detik...');
+            socket.onclose = function() {
+                console.warn('WebSocket terputus, reconnect dalam 3 detik...');
                 setTimeout(connectWebSocket, 3000);
             };
 
-            sensorSocket.onerror = function(e) {
-                console.error('WebSocket error:', e);
+            socket.onerror = function(err) {
+                console.error('WebSocket error:', err);
             };
         }
 
