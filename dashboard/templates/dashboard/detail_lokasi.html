@@ -381,6 +381,24 @@
             box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
             outline: none;
         }
+        /* ===== PAGINATION ===== */
+        .pagination-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+        .pagination-controls .btn-group {
+            gap: 0.3rem;
+        }
+        .pagination-controls .btn {
+            border-radius: 30px;
+            padding: 0.3rem 1.2rem;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
         /* ===== EMPTY STATE ===== */
         .empty-state {
             padding: 3rem 1rem;
@@ -426,6 +444,13 @@
             .filter-row select, .filter-row input {
                 width: 100%;
             }
+            .pagination-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .pagination-controls .btn-group {
+                justify-content: center;
+            }
         }
         @media (max-width: 480px) {
             .sensor-grid {
@@ -467,7 +492,7 @@
     <!-- ===== NAVBAR ===== -->
     <nav class="navbar navbar-expand-lg navbar-custom">
         <div class="container">
-            <a class="navbar-brand" href="#">
+            <a class="navbar-brand" href="{% url 'halaman_utama' %}">
                 <i class="bi bi-water"></i> 🌊 Crabs aquasense
             </a>
             <a href="{% url 'halaman_utama' %}" class="btn btn-outline-light btn-sm">
@@ -523,8 +548,8 @@
                         </div>
                         <!-- Suhu Air -->
                         <div id="box_suhu_{{ item.alat.id_alat }}" class="sensor-item
-                            {% if item.sensor_terbaru.suhu_air >= 25 and item.sensor_terbaru.suhu_air <= 30 %}status-good
-                            {% elif item.sensor_terbaru.suhu_air >= 20 and item.sensor_terbaru.suhu_air <= 33 %}status-warning
+                            {% if item.sensor_terbaru.suhu_air >= 25 and item.sensor_terbaru.suhu_air <= 35 %}status-good
+                            {% elif item.sensor_terbaru.suhu_air >= 20 and item.sensor_terbaru.suhu_air < 25 %}status-warning
                             {% else %}status-danger{% endif %}">
                             <div class="label"><i class="bi bi-thermometer-half"></i> Suhu Air</div>
                             <div class="value" id="suhu_air_{{ item.alat.id_alat }}">{{ item.sensor_terbaru.suhu_air }}</div>
@@ -664,7 +689,7 @@
                                 </div>
                             </div>
 
-                            <!-- Tabel Dinamis Riwayat (sinkron filter) -->
+                            <!-- Tabel Dinamis dengan Paginasi -->
                             <div class="mt-3">
                                 <h6 class="fw-bold text-secondary" style="font-size:0.95rem;">
                                     <i class="bi bi-table me-2"></i>
@@ -687,6 +712,18 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                <!-- Kontrol Paginasi -->
+                                <div class="pagination-controls" id="paginationControls_{{ item.alat.id_alat }}">
+                                    <span id="pageInfo_{{ item.alat.id_alat }}" class="text-muted small">Halaman 1 dari 1</span>
+                                    <div class="btn-group">
+                                        <button class="btn btn-outline-secondary btn-sm" id="prevPageBtn_{{ item.alat.id_alat }}" disabled>
+                                            <i class="bi bi-chevron-left"></i> Prev
+                                        </button>
+                                        <button class="btn btn-outline-secondary btn-sm" id="nextPageBtn_{{ item.alat.id_alat }}" disabled>
+                                            Next <i class="bi bi-chevron-right"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -705,15 +742,22 @@
                                 data: {
                                     labels: chartData.waktu,
                                     datasets: [
-                                        { label: 'Suhu Air', data: chartData.suhu_air, borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.05)', fill: true, tension: 0.4, pointRadius: 2 },
-                                        { label: 'Suhu Udara', data: chartData.suhu_lingkungan, borderColor: '#198754', borderDash: [5,5], tension: 0.4, pointRadius: 2 }
+                                        { label: 'Suhu Air', data: chartData.suhu_air, borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.05)', fill: true, tension: 0.4, pointRadius: 0 },
+                                        { label: 'Suhu Udara', data: chartData.suhu_lingkungan, borderColor: '#198754', borderDash: [5,5], tension: 0.4, pointRadius: 0 }
                                     ]
                                 },
                                 options: {
                                     responsive: true,
                                     maintainAspectRatio: false,
                                     plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
-                                    scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } }
+                                    scales: {
+                                        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                                        x: { grid: { display: false }, ticks: { maxTicksLimit: 15, autoSkip: true, maxRotation: 45 } }
+                                    },
+                                    elements: {
+                                        point: { radius: 0, hoverRadius: 5 },
+                                        line: { tension: 0.3, borderWidth: 2 }
+                                    }
                                 }
                             });
 
@@ -723,8 +767,8 @@
                                 data: {
                                     labels: chartData.waktu,
                                     datasets: [
-                                        { label: 'DO', data: chartData.do, borderColor: '#0dcaf0', yAxisID: 'y', tension: 0.4, pointRadius: 2 },
-                                        { label: 'TDS', data: chartData.tds, borderColor: '#ffc107', yAxisID: 'y1', tension: 0.4, pointRadius: 2 }
+                                        { label: 'DO', data: chartData.do, borderColor: '#0dcaf0', yAxisID: 'y', tension: 0.4, pointRadius: 0 },
+                                        { label: 'TDS', data: chartData.tds, borderColor: '#ffc107', yAxisID: 'y1', tension: 0.4, pointRadius: 0 }
                                     ]
                                 },
                                 options: {
@@ -734,14 +778,52 @@
                                     scales: {
                                         y: { position: 'left', beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
                                         y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
-                                        x: { grid: { display: false } }
+                                        x: { grid: { display: false }, ticks: { maxTicksLimit: 15, autoSkip: true, maxRotation: 45 } }
+                                    },
+                                    elements: {
+                                        point: { radius: 0, hoverRadius: 5 },
+                                        line: { tension: 0.3, borderWidth: 2 }
                                     }
                                 }
                             });
 
-                            // ========== RIWAYAT CHARTS ==========
+                            // ========== RIWAYAT CHARTS & TABEL DENGAN PAGINASI ==========
                             let riwayatChartSuhu = null;
                             let riwayatChartKualitas = null;
+                            let allTableData = []; // array untuk menyimpan seluruh data tabel
+                            let currentPage = 1;
+                            const rowsPerPage = 50;
+
+                            function renderTable() {
+                                const tbody = document.getElementById('riwayatTableBody_' + alatId);
+                                if (!tbody) return;
+                                tbody.innerHTML = '';
+                                const totalPages = Math.ceil(allTableData.length / rowsPerPage) || 1;
+                                if (currentPage > totalPages) currentPage = totalPages;
+                                const start = (currentPage - 1) * rowsPerPage;
+                                const end = Math.min(start + rowsPerPage, allTableData.length);
+                                const pageData = allTableData.slice(start, end);
+                                if (pageData.length === 0) {
+                                    tbody.innerHTML = `<tr><td colspan="6" class="text-muted text-center">Tidak ada data</td></tr>`;
+                                } else {
+                                    pageData.forEach(item => {
+                                        const tr = document.createElement('tr');
+                                        tr.innerHTML = `
+                                            <td class="text-nowrap">${item.waktu}</td>
+                                            <td>${item.do}</td>
+                                            <td>${item.suhu_air}</td>
+                                            <td>${item.tds}</td>
+                                            <td>${item.jsn}</td>
+                                            <td>${item.suhu_lingkungan}</td>
+                                        `;
+                                        tbody.appendChild(tr);
+                                    });
+                                }
+                                // Update info halaman
+                                document.getElementById('pageInfo_' + alatId).innerText = `Halaman ${currentPage} dari ${totalPages}`;
+                                document.getElementById('prevPageBtn_' + alatId).disabled = (currentPage <= 1);
+                                document.getElementById('nextPageBtn_' + alatId).disabled = (currentPage >= totalPages);
+                            }
 
                             function loadRiwayat(period, filterVal) {
                                 const ctxSuhu = document.getElementById('chartRiwayatSuhu_' + alatId);
@@ -751,29 +833,9 @@
                                 fetch('/api/chart-data/' + alatId + '/?period=' + period + '&filter=' + encodeURIComponent(filterVal))
                                     .then(res => res.json())
                                     .then(data => {
+                                        // Hancurkan chart lama
                                         if (riwayatChartSuhu) riwayatChartSuhu.destroy();
                                         if (riwayatChartKualitas) riwayatChartKualitas.destroy();
-
-                                        if (data.labels && data.labels.length === 0) {
-                                            riwayatChartSuhu = new Chart(ctxSuhu, {
-                                                type: 'line',
-                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
-                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                                            });
-                                            riwayatChartKualitas = new Chart(ctxKualitas, {
-                                                type: 'line',
-                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
-                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                                            });
-                                            // Update tabel kosong
-                                            updateRiwayatTable([], period);
-                                            return;
-                                        }
-
-                                        // Untuk daily dan weekly (detail), titik disembunyikan
-                                        const isDetail = (period === 'daily' || period === 'weekly');
-                                        const pointRadius = isDetail ? 0 : 2;
-                                        const tension = isDetail ? 0.1 : 0.4;
 
                                         // Update judul grafik
                                         const titleMap = {
@@ -785,7 +847,28 @@
                                         document.getElementById('chartTitleSuhu_' + alatId).innerText = 'Suhu ' + (titleMap[period] || '');
                                         document.getElementById('chartTitleKualitas_' + alatId).innerText = 'DO & TDS ' + (titleMap[period] || '');
 
-                                        // Maks ticks untuk sumbu X
+                                        if (!data.labels || data.labels.length === 0) {
+                                            // Chart kosong
+                                            riwayatChartSuhu = new Chart(ctxSuhu, {
+                                                type: 'line',
+                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
+                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                            });
+                                            riwayatChartKualitas = new Chart(ctxKualitas, {
+                                                type: 'line',
+                                                data: { labels: ['Tidak ada data'], datasets: [{ label: 'Data kosong', data: [0], borderColor: '#ccc' }] },
+                                                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                                            });
+                                            allTableData = [];
+                                            currentPage = 1;
+                                            renderTable();
+                                            return;
+                                        }
+
+                                        // Konfigurasi Chart
+                                        const isDetail = (period === 'daily' || period === 'weekly');
+                                        const pointRadius = 0; // selalu 0 agar ringan
+                                        const tension = isDetail ? 0.1 : 0.4;
                                         let maxTicks = 20;
                                         if (period === 'weekly') maxTicks = 30;
                                         else if (period === 'daily') maxTicks = 15;
@@ -805,7 +888,11 @@
                                                 plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
                                                 scales: {
                                                     y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
-                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: maxTicks, autoSkip: true } }
+                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: maxTicks, autoSkip: true, maxRotation: 45 } }
+                                                },
+                                                elements: {
+                                                    point: { radius: 0, hoverRadius: 5 },
+                                                    line: { tension: 0.3, borderWidth: 2 }
                                                 }
                                             }
                                         });
@@ -826,17 +913,39 @@
                                                 scales: {
                                                     y: { position: 'left', beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
                                                     y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
-                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: maxTicks, autoSkip: true } }
+                                                    x: { grid: { display: false }, ticks: { maxTicksLimit: 20, autoSkip: true, maxRotation: 45 } }
+                                                },
+                                                elements: {
+                                                    point: { radius: 0, hoverRadius: 5 },
+                                                    line: { tension: 0.3, borderWidth: 2 }
                                                 }
                                             }
                                         });
 
-                                        // ========== UPDATE TABLE DINAMIS ==========
-                                        updateRiwayatTable(data, period);
+                                        // Simpan data tabel ke array allTableData
+                                        const titleMapTable = {
+                                            'daily': 'Data Harian',
+                                            'weekly': 'Data Mingguan (Rata-rata per Jam)',
+                                            'monthly': 'Data Bulanan (Rata-rata per Hari)',
+                                            'yearly': 'Data Tahunan (Rata-rata per Bulan)'
+                                        };
+                                        document.getElementById('riwayatTableTitle_' + alatId).innerText = titleMapTable[period] || 'Data Riwayat';
+
+                                        allTableData = data.labels.map((label, i) => ({
+                                            waktu: label,
+                                            do: data.do[i],
+                                            suhu_air: data.suhu_air[i],
+                                            tds: data.tds[i],
+                                            jsn: data.jsn[i],
+                                            suhu_lingkungan: data.suhu_lingkungan[i]
+                                        }));
+                                        currentPage = 1;
+                                        renderTable();
 
                                     })
                                     .catch(err => {
                                         console.error('Error loading riwayat:', err);
+                                        // Tampilkan error di chart & tabel
                                         if (riwayatChartSuhu) riwayatChartSuhu.destroy();
                                         if (riwayatChartKualitas) riwayatChartKualitas.destroy();
                                         riwayatChartSuhu = new Chart(ctxSuhu, {
@@ -849,45 +958,10 @@
                                             data: { labels: ['Error'], datasets: [{ label: 'Gagal', data: [0], borderColor: '#dc3545' }] },
                                             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
                                         });
-                                        // Tabel error
-                                        const tableBody = document.getElementById('riwayatTableBody_' + alatId);
-                                        if (tableBody) {
-                                            tableBody.innerHTML = `<tr><td colspan="6" class="text-muted text-center">Error memuat data</td></tr>`;
-                                        }
+                                        allTableData = [];
+                                        currentPage = 1;
+                                        renderTable();
                                     });
-                            }
-
-                            // Fungsi untuk update tabel dinamis
-                            function updateRiwayatTable(data, period) {
-                                const tableBody = document.getElementById('riwayatTableBody_' + alatId);
-                                const tableTitle = document.getElementById('riwayatTableTitle_' + alatId);
-                                if (!tableBody) return;
-
-                                const titleMap = {
-                                    'daily': 'Data Harian',
-                                    'weekly': 'Data Mingguan (Rata-rata per Jam)',
-                                    'monthly': 'Data Bulanan (Rata-rata per Hari)',
-                                    'yearly': 'Data Tahunan (Rata-rata per Bulan)'
-                                };
-                                tableTitle.innerText = titleMap[period] || 'Data Riwayat';
-
-                                tableBody.innerHTML = '';
-                                if (data.labels && data.labels.length > 0) {
-                                    for (let i = 0; i < data.labels.length; i++) {
-                                        const row = document.createElement('tr');
-                                        row.innerHTML = `
-                                            <td class="text-nowrap">${data.labels[i]}</td>
-                                            <td>${data.do[i]}</td>
-                                            <td>${data.suhu_air[i]}</td>
-                                            <td>${data.tds[i]}</td>
-                                            <td>${data.jsn[i]}</td>
-                                            <td>${data.suhu_lingkungan[i]}</td>
-                                        `;
-                                        tableBody.appendChild(row);
-                                    }
-                                } else {
-                                    tableBody.innerHTML = `<tr><td colspan="6" class="text-muted text-center">Tidak ada data untuk periode ini</td></tr>`;
-                                }
                             }
 
                             // ========== FILTER LOGIC ==========
@@ -941,6 +1015,21 @@
                                 if (filterVal) loadRiwayat(this.value, filterVal);
                             });
                             applyBtn.addEventListener('click', applyFilter);
+
+                            // ========== PAGINATION BUTTONS ==========
+                            document.getElementById('prevPageBtn_' + alatId).addEventListener('click', function() {
+                                if (currentPage > 1) {
+                                    currentPage--;
+                                    renderTable();
+                                }
+                            });
+                            document.getElementById('nextPageBtn_' + alatId).addEventListener('click', function() {
+                                const totalPages = Math.ceil(allTableData.length / rowsPerPage);
+                                if (currentPage < totalPages) {
+                                    currentPage++;
+                                    renderTable();
+                                }
+                            });
 
                             // ========== TAB INIT ==========
                             const riwayatTab = document.getElementById('riwayat-tab-' + alatId);

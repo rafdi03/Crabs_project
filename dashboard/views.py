@@ -10,6 +10,7 @@ from .models import Lokasi, Alat, DataSensor
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncDate, TruncMonth, TruncHour
 import csv
 import json
+from collections import defaultdict
 
 # 1. Login
 def login_view(request):
@@ -51,7 +52,6 @@ def halaman_utama(request):
 def detail_lokasi(request, lokasi_id):
     lokasi_terpilih = get_object_or_404(Lokasi, id=lokasi_id)
     daftar_alat = Alat.objects.filter(lokasi=lokasi_terpilih, status_aktif=True)
-    
     alat_data_list = []
     for alat in daftar_alat:
         semua_history = alat.data_sensor.all()[:30]
@@ -77,7 +77,7 @@ def detail_lokasi(request, lokasi_id):
             'chart_data': chart_data,
             'tabel_riwayat': semua_history
         })
-    
+
     context = {
         'lokasi': lokasi_terpilih,
         'alat_data_list': alat_data_list
@@ -106,14 +106,13 @@ def download_csv_lokasi(request, lokasi_id):
             ])
     return response
 
-# 7. API chart-bulanan (untuk kompatibilitas lama, bisa dihapus jika tidak digunakan)
+# 7. API chart-bulanan
 @login_required(login_url='login')
 def chart_bulanan(request, alat_id):
     try:
         alat = Alat.objects.get(id_alat=alat_id, status_aktif=True)
     except Alat.DoesNotExist:
         return JsonResponse({'error': 'Alat tidak ditemukan'}, status=404)
-
     mode = request.GET.get('mode', 'raw')
     end_date = timezone.now()
     start_date = end_date - timedelta(days=30)
@@ -157,7 +156,7 @@ def chart_bulanan(request, alat_id):
         }
     return JsonResponse(result)
 
-# 8. API chart-data (baru) – support daily, weekly, monthly, yearly
+# 8. API chart-data (FIXED: Support 10 Menit & Anti-Lag)
 @login_required
 def chart_data(request, alat_id):
     try:
@@ -168,20 +167,20 @@ def chart_data(request, alat_id):
     period = request.GET.get('period', 'monthly')
     filter_val = request.GET.get('filter', '')
 
-    # Tentukan rentang waktu
     if period == 'daily':
-        # filter = YYYY-MM-DD
         try:
             dt = datetime.strptime(filter_val, '%Y-%m-%d')
         except (ValueError, TypeError):
             dt = timezone.now().date()
         start_date = dt
         end_date = dt + timedelta(days=1)
+        
         data = DataSensor.objects.filter(
             alat=alat,
             timestamp__gte=start_date,
             timestamp__lt=end_date
         ).order_by('timestamp')
+        
         labels = [d.timestamp.strftime('%H:%M') for d in data]
         result = {
             'labels': labels,
@@ -194,7 +193,6 @@ def chart_data(request, alat_id):
         return JsonResponse(result)
 
     elif period == 'weekly':
-    # filter = YYYY-Www (contoh: 2026-W25) atau YYYY-WW (tanpa W)
         try:
             if 'W' in filter_val:
                 parts = filter_val.split('-')
@@ -205,34 +203,11 @@ def chart_data(request, alat_id):
             start_date = datetime.fromisocalendar(year, week, 1)
             end_date = start_date + timedelta(days=7)
         except:
-            # fallback ke minggu ini
             today = timezone.now().date()
             start_date = today - timedelta(days=today.weekday())
             end_date = start_date + timedelta(days=7)
-        # Agregasi per JAM
-        data_agg = (
-            DataSensor.objects
-            .filter(alat=alat, timestamp__gte=start_date, timestamp__lt=end_date)
-            .annotate(jam=TruncHour('timestamp'))
-            .values('jam')
-            .annotate(
-                avg_suhu_air=Avg('suhu_air'),
-                avg_suhu_lingkungan=Avg('suhu_lingkungan'),
-                avg_do=Avg('do_level'),
-                avg_tds=Avg('tds_level'),
-                avg_jsn=Avg('jsn_distance')
-            )
-            .order_by('jam')
-        )
-        labels = [d['jam'].strftime('%a %H:%M') for d in data_agg]
-        suhu_air = [round(d['avg_suhu_air'], 2) for d in data_agg]
-        suhu_lingkungan = [round(d['avg_suhu_lingkungan'], 2) for d in data_agg]
-        do = [round(d['avg_do'], 2) for d in data_agg]
-        tds = [round(d['avg_tds'], 2) for d in data_agg]
-        jsn = [round(d['avg_jsn'], 2) for d in data_agg]
-        
+
     elif period == 'monthly':
-        # filter = YYYY-MM
         try:
             year, month = map(int, filter_val.split('-'))
             start_date = datetime(year, month, 1)
@@ -247,30 +222,8 @@ def chart_data(request, alat_id):
                 end_date = today.replace(year=today.year+1, month=1, day=1)
             else:
                 end_date = today.replace(month=today.month+1, day=1)
-        # Agregasi per hari
-        data_agg = (
-            DataSensor.objects
-            .filter(alat=alat, timestamp__gte=start_date, timestamp__lt=end_date)
-            .annotate(day=TruncDate('timestamp'))
-            .values('day')
-            .annotate(
-                avg_suhu_air=Avg('suhu_air'),
-                avg_suhu_lingkungan=Avg('suhu_lingkungan'),
-                avg_do=Avg('do_level'),
-                avg_tds=Avg('tds_level'),
-                avg_jsn=Avg('jsn_distance')
-            )
-            .order_by('day')
-        )
-        labels = [d['day'].strftime('%d %b') for d in data_agg]
-        suhu_air = [round(d['avg_suhu_air'], 2) for d in data_agg]
-        suhu_lingkungan = [round(d['avg_suhu_lingkungan'], 2) for d in data_agg]
-        do = [round(d['avg_do'], 2) for d in data_agg]
-        tds = [round(d['avg_tds'], 2) for d in data_agg]
-        jsn = [round(d['avg_jsn'], 2) for d in data_agg]
 
     elif period == 'yearly':
-        # filter = YYYY
         try:
             year = int(filter_val)
             start_date = datetime(year, 1, 1)
@@ -279,34 +232,60 @@ def chart_data(request, alat_id):
             year = timezone.now().year
             start_date = datetime(year, 1, 1)
             end_date = datetime(year+1, 1, 1)
-        # Agregasi per bulan
-        data_agg = (
-            DataSensor.objects
-            .filter(alat=alat, timestamp__gte=start_date, timestamp__lt=end_date)
-            .annotate(month=TruncMonth('timestamp'))
-            .values('month')
-            .annotate(
-                avg_suhu_air=Avg('suhu_air'),
-                avg_suhu_lingkungan=Avg('suhu_lingkungan'),
-                avg_do=Avg('do_level'),
-                avg_tds=Avg('tds_level'),
-                avg_jsn=Avg('jsn_distance')
-            )
-            .order_by('month')
-        )
-        labels = [d['month'].strftime('%b') for d in data_agg]
-        suhu_air = [round(d['avg_suhu_air'], 2) for d in data_agg]
-        suhu_lingkungan = [round(d['avg_suhu_lingkungan'], 2) for d in data_agg]
-        do = [round(d['avg_do'], 2) for d in data_agg]
-        tds = [round(d['avg_tds'], 2) for d in data_agg]
-        jsn = [round(d['avg_jsn'], 2) for d in data_agg]
 
+    # Fetch data mentah dari database
+    data_qs = DataSensor.objects.filter(
+        alat=alat,
+        timestamp__gte=start_date,
+        timestamp__lt=end_date
+    ).order_by('timestamp')
+
+    # FUNGSI BANTUAN: Mengelompokkan data ke dalam interval waktu tertentu
+    def aggregate_data(qs, interval_menit):
+        buckets = defaultdict(list)
+        for d in qs:
+            # Pembulatan ke bawah ke interval menit terdekat (misal: 10 menit)
+            minute_bucket = (d.timestamp.minute // interval_menit) * interval_menit
+            t = d.timestamp.replace(minute=minute_bucket, second=0, microsecond=0)
+            buckets[t].append(d)
+            
+        aggregated = []
+        for t in sorted(buckets.keys()):
+            items = buckets[t]
+            def get_avg(attr):
+                vals = [getattr(i, attr) for i in items if getattr(i, attr) is not None]
+                return round(sum(vals) / len(vals), 2) if vals else None
+                
+            aggregated.append({
+                'timestamp': t,
+                'do_level': get_avg('do_level'),
+                'suhu_air': get_avg('suhu_air'),
+                'tds_level': get_avg('tds_level'),
+                'jsn_distance': get_avg('jsn_distance'),
+                'suhu_lingkungan': get_avg('suhu_lingkungan'),
+            })
+        return aggregated
+
+    # TERAPKAN AGREGASI 10 MENIT UNTUK MINGGUAN & BULANAN
+    if period in ['weekly', 'monthly']:
+        aggregated = aggregate_data(data_qs, 10) # Interval 10 Menit
+        if period == 'weekly':
+            labels = [d['timestamp'].strftime('%a %H:%M') for d in aggregated]
+        else:
+            labels = [d['timestamp'].strftime('%d %b %H:%M') for d in aggregated]
+            
+    elif period == 'yearly':
+        # Untuk tahunan, 10 menit terlalu besar (bisa > 50.000 data). Kita gunakan 1 Jam agar browser tidak crash.
+        aggregated = aggregate_data(data_qs, 60) 
+        labels = [d['timestamp'].strftime('%d %b %H:%M') for d in aggregated]
+
+    # Kembalikan response dengan struktur yang SAMA PERSIS (tidak ada variable baru)
     result = {
         'labels': labels,
-        'suhu_air': suhu_air,
-        'suhu_lingkungan': suhu_lingkungan,
-        'do': do,
-        'tds': tds,
-        'jsn': jsn,
+        'suhu_air': [d['suhu_air'] for d in aggregated],
+        'suhu_lingkungan': [d['suhu_lingkungan'] for d in aggregated],
+        'do': [d['do_level'] for d in aggregated],
+        'tds': [d['tds_level'] for d in aggregated],
+        'jsn': [d['jsn_distance'] for d in aggregated],
     }
     return JsonResponse(result)

@@ -64,6 +64,8 @@ class Command(BaseCommand):
         
         for field, (min_val, max_val, label) in ranges.items():
             value = payload.get(field, 0.0)
+            if value == 0.0:
+                continue # Izinkan nilai 0 sebagai indikator sensor error/belum terpasang
             if not (min_val <= value <= max_val):
                 raise ValueError(f"{label} unrealistic: {value:.2f} (range: {min_val}-{max_val})")
         
