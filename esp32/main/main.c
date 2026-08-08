@@ -50,12 +50,12 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DS18B20_PIN       GPIO_NUM_15   // Suhu Air
-#define DHT_PIN           GPIO_NUM_13   // Suhu & Kelembaban Lingkungan
-#define DHT_TYPE          DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
+#define DHT_PIN           GPIO_NUM_15   // Suhu & Kelembaban Lingkungan (D15)
+#define DS18B20_PIN       GPIO_NUM_13   // Suhu Air (D13)
+#define DHT_TYPE          DHT_TYPE_DHT22 // Format DHT22 / AM2302
 
-#define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
-#define TRIG_PIN          GPIO_NUM_14   // JSN-SR04T Trig (Dipindah ke D15 agar D14 bebas untuk Relay 5)
+#define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (D34 / Analog In)
+#define TRIG_PIN          GPIO_NUM_14   // JSN-SR04T Trig
 #define ECHO_PIN          GPIO_NUM_27   // JSN-SR04T Echo
 
 // Kalibrasi ADC TDS / Modul Hujan
@@ -295,6 +295,92 @@ static bool ds18b20_read_temperature(float *temperature) {
 }
 
 // ==========================================
+// BACA LANGSUNG DHT22 / DHT11 (MICROSECOND BIT-BANGING DENGAN CRITICAL SECTION)
+// ==========================================
+static bool baca_dht22_langsung(gpio_num_t pin, float *humidity, float *temperature) {
+    uint8_t data[5] = {0, 0, 0, 0, 0};
+
+    // 1. Kirim start pulse ke DHT: Tarik LOW selama 20ms
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pin, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    // 2. Lepas HIGH selama 40us
+    gpio_set_level(pin, 1);
+    esp_rom_delay_us(40);
+    gpio_set_direction(pin, GPIO_MODE_INPUT);
+
+    // 3. Masuk Critical Section untuk presisi mikrodetik
+    taskENTER_CRITICAL(&mux);
+
+    // Tunggu respon sensor LOW (80us)
+    int timeout = 150;
+    while (gpio_get_level(pin) == 1) {
+        if (--timeout == 0) { taskEXIT_CRITICAL(&mux); return false; }
+        esp_rom_delay_us(1);
+    }
+
+    // Tunggu sensor respon LOW selesai (80us)
+    timeout = 150;
+    while (gpio_get_level(pin) == 0) {
+        if (--timeout == 0) { taskEXIT_CRITICAL(&mux); return false; }
+        esp_rom_delay_us(1);
+    }
+
+    // Tunggu sensor respon HIGH selesai (80us)
+    timeout = 150;
+    while (gpio_get_level(pin) == 1) {
+        if (--timeout == 0) { taskEXIT_CRITICAL(&mux); return false; }
+        esp_rom_delay_us(1);
+    }
+
+    // 4. Baca 40 bit data
+    for (int i = 0; i < 40; i++) {
+        // Tunggu awal bit (LOW 50us)
+        timeout = 150;
+        while (gpio_get_level(pin) == 0) {
+            if (--timeout == 0) { taskEXIT_CRITICAL(&mux); return false; }
+            esp_rom_delay_us(1);
+        }
+
+        // Ukur durasi HIGH: jika > 40us maka bit 1, jika < 30us maka bit 0
+        esp_rom_delay_us(38);
+        if (gpio_get_level(pin) == 1) {
+            data[i / 8] |= (1 << (7 - (i % 8)));
+            timeout = 150;
+            while (gpio_get_level(pin) == 1) {
+                if (--timeout == 0) break;
+                esp_rom_delay_us(1);
+            }
+        }
+    }
+
+    taskEXIT_CRITICAL(&mux);
+
+    // 5. Verifikasi Checksum
+    uint8_t checksum = (data[0] + data[1] + data[2] + data[3]) & 0xFF;
+    if (checksum != data[4] || (data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 0)) {
+        return false;
+    }
+
+    // 6. Hitung Kelembaban & Suhu (Format DHT22)
+    int16_t raw_hum = (data[0] << 8) | data[1];
+    int16_t raw_temp = ((data[2] & 0x7F) << 8) | data[3];
+    if (data[2] & 0x80) raw_temp = -raw_temp;
+
+    *humidity = (float)raw_hum * 0.1f;
+    *temperature = (float)raw_temp * 0.1f;
+
+    // Jika nilai tidak realistis, format sebagai DHT11
+    if (*humidity > 100.0f || *temperature < -40.0f || *temperature > 80.0f) {
+        *humidity = (float)data[0];
+        *temperature = (float)data[2];
+    }
+
+    return true;
+}
+
+// ==========================================
 // BACA JSN-SR04T (LEVEL / JARAK AIR)
 // ==========================================
 static float bacaJarakJSN(void) {
@@ -339,8 +425,11 @@ void hardware_init(void) {
     gpio_config(&io_conf_ds);
     gpio_set_level(DS18B20_PIN, 1);
 
-    // 2. Inisialisasi Pull-Up GPIO DHT22 (D15)
+    // 2. Inisialisasi Open-Drain & Pull-Up GPIO DHT22 (D15)
+    gpio_reset_pin(DHT_PIN);
+    gpio_set_direction(DHT_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
     gpio_set_pull_mode(DHT_PIN, GPIO_PULLUP_ONLY);
+    gpio_set_level(DHT_PIN, 1);
 
     // 2. JSN-SR04T GPIO (Trig: D15, Echo: D27)
     gpio_config_t io_conf_jsn = {
@@ -412,22 +501,22 @@ void sensor_task(void *pvParameters) {
             suhu_air = 0.0f;
         }
 
-        // 2. Baca DHT22 (dengan Auto-Retry & Fallback DHT11)
+        // 2. Baca DHT22 pada D15 (Direct Microsecond Bit-Banging + Library Fallback)
         float suhu_lingkungan = 0.0f;
         float kelembaban = 0.0f;
-        esp_err_t res = dht_read_float_data(DHT_TYPE, DHT_PIN, &kelembaban, &suhu_lingkungan);
-        if (res != ESP_OK) {
-            // Coba sekali lagi dengan jeda 200ms
-            vTaskDelay(pdMS_TO_TICKS(200));
-            res = dht_read_float_data(DHT_TYPE, DHT_PIN, &kelembaban, &suhu_lingkungan);
-            if (res != ESP_OK) {
-                // Jika masih gagal, coba fallback ke DHT11 (jika sensor fisik ternyata tipe DHT11)
+        bool dht_ok = baca_dht22_langsung(DHT_PIN, &kelembaban, &suhu_lingkungan);
+        if (!dht_ok) {
+            vTaskDelay(pdMS_TO_TICKS(150));
+            esp_err_t res = dht_read_float_data(DHT_TYPE, DHT_PIN, &kelembaban, &suhu_lingkungan);
+            if (res == ESP_OK) {
+                dht_ok = true;
+            } else {
                 res = dht_read_float_data(DHT_TYPE_DHT11, DHT_PIN, &kelembaban, &suhu_lingkungan);
+                if (res == ESP_OK) dht_ok = true;
             }
         }
-        if (res != ESP_OK) {
-            ESP_LOGW(TAG, "DHT Belum Terbaca di GPIO %d! Error: %s (0x%x). Pastikan Resistor Pull-up 4.7kΩ terpasang.", 
-                     DHT_PIN, esp_err_to_name(res), res);
+        if (!dht_ok) {
+            ESP_LOGW(TAG, "DHT22 pada D15 (GPIO %d) belum merespons pulsa!", DHT_PIN);
             suhu_lingkungan = 0.0f;
             kelembaban = 0.0f;
         } else {
