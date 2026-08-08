@@ -42,8 +42,14 @@ static bool try_mount_sdcard(void) {
     slot_config.gpio_cs = SD_CS_PIN;
     slot_config.host_id = SPI2_HOST;
 
+    // Redam log error dari driver ESP-IDF jika kartu tidak terpasang
+    esp_log_level_set("sdmmc_sd", ESP_LOG_NONE);
+    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
+
     esp_err_t ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_config, &mount_config, &sd_card);
     if (ret == ESP_OK) {
+        esp_log_level_set("sdmmc_sd", ESP_LOG_INFO);
+        esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_INFO);
         is_sd_mounted = true;
         ESP_LOGI(TAG, ">>> SD Card BERHASIL Dikenali & Di-mount di %s! <<<", SD_MOUNT_POINT);
 

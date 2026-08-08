@@ -50,8 +50,8 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DHT_PIN           GPIO_NUM_15   // Suhu & Kelembaban Lingkungan (D15)
-#define DS18B20_PIN       GPIO_NUM_13   // Suhu Air (D13)
+#define DHT_PIN           GPIO_NUM_13   // Suhu & Kelembaban Lingkungan (D15)
+#define DS18B20_PIN       GPIO_NUM_15   // Suhu Air (D13)
 #define DHT_TYPE          DHT_TYPE_DHT22 // Format DHT22 / AM2302
 
 #define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (D34 / Analog In)
@@ -515,16 +515,41 @@ void sensor_task(void *pvParameters) {
                 if (res == ESP_OK) dht_ok = true;
             }
         }
-        if (!dht_ok) {
-            ESP_LOGW(TAG, "DHT22 pada D15 (GPIO %d) belum merespons pulsa!", DHT_PIN);
-            suhu_lingkungan = 0.0f;
-            kelembaban = 0.0f;
-        } else {
+
+        static float last_suhu_udara = 0.0f;
+        static float last_kelembaban = 0.0f;
+        static int dht_fail_count = 0;
+
+        if (dht_ok && suhu_lingkungan > 0.0f && kelembaban > 0.0f) {
+            last_suhu_udara = suhu_lingkungan;
+            last_kelembaban = kelembaban;
+            dht_fail_count = 0;
             ESP_LOGI(TAG, "DHT Sukses Terbaca: Suhu=%.1f °C, Kelembaban=%.1f %%", suhu_lingkungan, kelembaban);
+        } else {
+            dht_fail_count++;
+            if (dht_fail_count < 4 && last_suhu_udara > 0.0f) {
+                suhu_lingkungan = last_suhu_udara;
+                kelembaban = last_kelembaban;
+            } else {
+                suhu_lingkungan = 0.0f;
+                kelembaban = 0.0f;
+            }
         }
 
         // 3. Baca JSN-SR04T (Jarak Air)
         float jsn_val = bacaJarakJSN();
+        static float last_jsn_val = 0.0f;
+        static int jsn_fail_count = 0;
+
+        if (jsn_val > 5.0f && jsn_val < 500.0f) {
+            last_jsn_val = jsn_val;
+            jsn_fail_count = 0;
+        } else {
+            jsn_fail_count++;
+            if (jsn_fail_count < 4 && last_jsn_val > 0.0f) {
+                jsn_val = last_jsn_val;
+            }
+        }
 
         // 4. Baca TDS dengan Median Filter & Kompensasi Suhu
         int medianADC = getMedianNum(analogBuffer, SCOUNT);
