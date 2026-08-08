@@ -1,16 +1,6 @@
 /*
  * Monitoring Tambak - ESP32 Firmware (Arduino IDE)
- * 
- * Konfigurasi Sensor:
- * - DS18B20 (Suhu Air)           -> Pin GPIO 33
- * - DHT22 / DHT11 (Suhu & Hum)   -> Pin GPIO 32
- * - JSN-SR04T (Jarak / Ketinggian):
- *     * TRIG                     -> Pin GPIO 18
- *     * ECHO                     -> Pin GPIO 34 (Input-only)
- * - TDS Sensor (Kualitas Air)    -> Pin GPIO 39 / VN (ADC1 Input)
- * 
- * Parameter lain (Nitrat, DO) diset 0.00 (placeholder).
- * Payload dikirim via MQTT dalam format JSON setiap 10 detik.
+ * Integrasi Lengkap: DS18B20, DHT22, TDS, JSN-SR04T, MQTT, dan LCD TFT ILI9342 / ILI9341
  */
 
 #include <WiFi.h>
@@ -20,10 +10,11 @@
 #include <DHT.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+#include <SPI.h>
 
-// ==========================================
-// KONFIGURASI WIFI & MQTT
-// ==========================================
+// ================= KONFIGURASI WIFI & MQTT =================
 const char* WIFI_SSID   = "Bayu";
 const char* WIFI_PASS   = "12345678";
 
@@ -32,19 +23,35 @@ const int   MQTT_PORT   = 1883;
 const char* DEVICE_ID   = "ESP32-001";
 const char* MQTT_TOPIC  = "tambak/ESP32-001/sensor";
 
-// ==========================================
-// KONFIGURASI PIN SENSOR
-// ==========================================
-#define DS18B20_PIN   33
-#define DHT_PIN       32
-#define DHT_TYPE      DHT22   // Ubah ke DHT11 jika menggunakan DHT11
+// ================= DEFINISI PIN LCD ILI9342 =================
+#define TFT_CS       5   
+#define TFT_DC       17  
+#define TFT_RST      16  
 
-#define JSN_TRIG_PIN  18
-#define JSN_ECHO_PIN  34
+// ================= DEFINISI PIN SENSOR =================
+#define DS18B20_PIN  33  // Suhu Air
+#define DHT_PIN      32  // Suhu & Kelembaban Lingkungan
+#define DHT_TYPE     DHT22 // Ubah ke DHT11 jika pakai DHT11
+#define TDS_ADC_PIN  34  // Analog Out Modul TDS / Hujan
+#define TRIG_PIN     14  // JSN-SR04T Trig
+#define ECHO_PIN     27  // JSN-SR04T Echo
 
-#define TDS_PIN       39      // Pin ADC (Sensor_VN)
+// ================= KALIBRASI ADC SENSOR HUJAN / TDS =================
+const int ADC_AIR_MURNI  = 3800; 
+const int PPM_AIR_MURNI  = 10;   
+const int ADC_AIR_KERAN  = 1500; 
+const int PPM_AIR_KERAN  = 150;  
 
-// Inisialisasi Objek Sensor & Network
+#define SCOUNT 20                
+
+// Class Custom Resolusi Full 320x240
+class ILI9342_Full : public Adafruit_ILI9341 {
+  public:
+    ILI9342_Full(int8_t cs, int8_t dc, int8_t rst) : Adafruit_ILI9341(cs, dc, rst) {}
+    void setFullResolution() { _width = 320; _height = 240; }
+};
+
+ILI9342_Full tft = ILI9342_Full(TFT_CS, TFT_DC, TFT_RST);
 OneWire oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
 DHT dht(DHT_PIN, DHT_TYPE);
@@ -54,164 +61,182 @@ PubSubClient mqttClient(espClient);
 
 // Timing control
 unsigned long lastPublishTime = 0;
-const unsigned long PUBLISH_INTERVAL = 10000; // 10 detik
+const unsigned long PUBLISH_INTERVAL = 10000; // 10 Detik
 
-// ==========================================
-// KONEKSI WIFI
-// ==========================================
+// Buffer Penyaring Noise ADC
+int analogBuffer[SCOUNT];
+int analogBufferIndex = 0;
+
+// Filter Median
+int getMedianNum(int bArray[], int iFilterLen) {
+  int bTab[iFilterLen];
+  for (byte i = 0; i < iFilterLen; i++) bTab[i] = bArray[i];
+  int i, j, bTemp;
+  for (j = 0; j < iFilterLen - 1; j++) {
+    for (i = 0; i < iFilterLen - j - 1; i++) {
+      if (bTab[i] > bTab[i + 1]) {
+        bTemp = bTab[i];
+        bTab[i] = bTab[i + 1];
+        bTab[i + 1] = bTemp;
+      }
+    }
+  }
+  if ((iFilterLen & 1) > 0) bTemp = bTab[(iFilterLen - 1) / 2];
+  else bTemp = (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2;
+  return bTemp;
+}
+
+int hitungPPMdarimodulHujan(int adcRaw) {
+  long ppm = map(adcRaw, ADC_AIR_MURNI, ADC_AIR_KERAN, PPM_AIR_MURNI, PPM_AIR_KERAN);
+  if (ppm < 0) ppm = 0;
+  return (int)ppm;
+}
+
+float bacaJarakJSN() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); 
+  if (duration == 0) return 0.0f;
+  return (duration * 0.0343f / 2.0f);
+}
+
+void setILI9342RotationMode2() {
+  uint8_t madctl = 0xC8;             
+  tft.sendCommand(0x36, &madctl, 1);
+  tft.setFullResolution();
+}
+
+void gambarLayoutUI() {
+  tft.fillScreen(ILI9341_BLACK);
+
+  // Header 320px
+  tft.fillRect(0, 0, 320, 28, 0x0015); 
+  tft.drawFastHLine(0, 28, 320, ILI9341_CYAN);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(50, 6);
+  tft.println("MONITORING TAMBAK");
+
+  // Grid 1: SUHU AIR & DHT (Atas Kiri)
+  tft.drawRoundRect(4, 32, 154, 98, 5, ILI9341_YELLOW);
+  tft.setTextColor(ILI9341_YELLOW);
+  tft.setTextSize(1);
+  tft.setCursor(10, 38);
+  tft.println("SUHU AIR & DHT");
+
+  // Grid 2: TDS (Atas Kanan)
+  tft.drawRoundRect(162, 32, 154, 98, 5, ILI9341_GREEN);
+  tft.setTextColor(ILI9341_GREEN);
+  tft.setTextSize(1);
+  tft.setCursor(170, 38);
+  tft.println("TDS (ESTIMASI PPM)");
+
+  // Grid 3: JARAK JSN (Bawah Kiri)
+  tft.drawRoundRect(4, 134, 154, 102, 5, ILI9341_CYAN);
+  tft.setTextColor(ILI9341_CYAN);
+  tft.setTextSize(1);
+  tft.setCursor(10, 140);
+  tft.println("KETINGGIAN AIR");
+
+  // Grid 4: OKSIGEN / DO (Bawah Kanan)
+  tft.drawRoundRect(162, 134, 154, 102, 5, ILI9341_MAGENTA);
+  tft.setTextColor(ILI9341_MAGENTA);
+  tft.setTextSize(1);
+  tft.setCursor(170, 140);
+  tft.println("OKSIGEN (DO)");
+}
+
+// ================= KONEKSI NETWORK =================
 void setupWiFi() {
   Serial.print("Menghubungkan ke WiFi ");
-  Serial.print(WIFI_SSID);
+  Serial.println(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-
   Serial.println("\nWiFi Terhubung!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
 }
 
-// ==========================================
-// SINKRONISASI WAKTU (NTP)
-// ==========================================
 void setupNTP() {
-  Serial.println("Mengkonfigurasi sinkronisasi waktu (NTP)...");
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-
   struct tm timeinfo;
   int retry = 0;
-  while (!getLocalTime(&timeinfo) && retry < 10) {
-    Serial.println("Menunggu sinkronisasi NTP...");
+  while (!getLocalTime(&timeinfo) && retry < 5) {
     delay(1000);
     retry++;
   }
-  if (retry < 10) {
-    Serial.println("Waktu berhasil disinkronkan!");
-  } else {
-    Serial.println("Gagal mendapatkan waktu NTP, melanjutkan...");
-  }
 }
 
-// Mengambil ISO8601 Timestamp String (UTC)
 String getTimestamp() {
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    return "1970-01-01T00:00:00Z";
-  }
+  if (!getLocalTime(&timeinfo)) return "1970-01-01T00:00:00Z";
   char timeBuffer[64];
   strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
   return String(timeBuffer);
 }
 
-// ==========================================
-// KONEKSI MQTT
-// ==========================================
 void reconnectMQTT() {
   while (!mqttClient.connected()) {
-    Serial.print("Mencoba koneksi MQTT ke ");
-    Serial.print(MQTT_BROKER);
-    Serial.print("... ");
-
     if (mqttClient.connect(DEVICE_ID)) {
-      Serial.println("Terhubung!");
+      Serial.println("MQTT Terhubung!");
     } else {
-      Serial.print("Gagal, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" mencoba lagi dalam 5 detik...");
-      delay(5000);
+      delay(3000);
     }
   }
 }
 
-// ==========================================
-// FUNGSI MEMBACA SENSOR JSN-SR04T (ULTRASONIK)
-// ==========================================
-float readJSN() {
-  digitalWrite(JSN_TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(JSN_TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(JSN_TRIG_PIN, LOW);
-
-  // Timeout 35000 microdetik (~6 meter)
-  long duration = pulseIn(JSN_ECHO_PIN, HIGH, 35000);
-  if (duration == 0) {
-    Serial.println("JSN-SR04T: Tidak mendeteksi pantulan objek / timeout.");
-    return 0.0f;
-  }
-  // Rumus jarak (cm) = (durasi * 0.0343) / 2
-  float distance = (duration * 0.0343f) / 2.0f;
-  return distance;
-}
-
-// ==========================================
-// FUNGSI MEMBACA SENSOR TDS DENGAN KOMPENSASI SUHU
-// ==========================================
-float readTDS(float temperature) {
-  const int SAMPLES = 10;
-  long totalRaw = 0;
-  for (int i = 0; i < SAMPLES; i++) {
-    totalRaw += analogRead(TDS_PIN);
-    delay(5);
-  }
-  float avgRaw = (float)totalRaw / SAMPLES;
-  
-  // Tegangan ADC ESP32 (12-bit: 0 - 4095, Vref ~3.3V)
-  float voltage = (avgRaw / 4095.0f) * 3.3f;
-
-  // Kompensasi suhu air (default 25.0 °C jika pembacaan sensor <= 0)
-  float temp = (temperature > 0.0f) ? temperature : 25.0f;
-  float compensationCoefficient = 1.0f + 0.02f * (temp - 25.0f);
-  float compensationVoltage = voltage / compensationCoefficient;
-
-  // Rumus konversi standar Gravity TDS (ppm)
-  float tds = (133.42f * pow(compensationVoltage, 3) - 255.86f * pow(compensationVoltage, 2) + 857.39f * compensationVoltage) * 0.5f;
-  if (tds < 0.0f) tds = 0.0f;
-
-  return tds;
-}
-
-// ==========================================
-// SETUP
-// ==========================================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== ESP32 TAMBAK (DS18B20, DHT, JSN, TDS) START ===");
 
-  // Setup Pin Sensor
-  pinMode(JSN_TRIG_PIN, OUTPUT);
-  pinMode(JSN_ECHO_PIN, INPUT);
-  pinMode(TDS_PIN, INPUT);
+  // Setup Pin Hardware
+  pinMode(TDS_ADC_PIN, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 
-  // Inisialisasi Sensor I2C / OneWire
+  // Init LCD
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_RST, HIGH); delay(50);
+  digitalWrite(TFT_RST, LOW);  delay(150);
+  digitalWrite(TFT_RST, HIGH); delay(150);
+
+  tft.begin();
+  SPI.setFrequency(10000000);
+  setILI9342RotationMode2();
+  tft.invertDisplay(true);
+
+  gambarLayoutUI();
+
+  // Init Sensor & Network
   ds18b20.begin();
   dht.begin();
-
-  // Koneksi Network
   setupWiFi();
   setupNTP();
 
-  // Setup MQTT Client
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
 }
 
-// ==========================================
-// LOOP
-// ==========================================
 void loop() {
-  // Pelihara Koneksi WiFi & MQTT
-  if (WiFi.status() != WL_CONNECTED) {
-    setupWiFi();
+  // Sampling ADC TDS (Background Process)
+  static unsigned long sampleTime = millis();
+  if (millis() - sampleTime > 30U) {
+    sampleTime = millis();
+    analogBuffer[analogBufferIndex] = analogRead(TDS_ADC_PIN);
+    analogBufferIndex++;
+    if (analogBufferIndex == SCOUNT) analogBufferIndex = 0;
   }
-  if (!mqttClient.connected()) {
-    reconnectMQTT();
-  }
+
+  // Koneksi Network Maintenance
+  if (WiFi.status() != WL_CONNECTED) setupWiFi();
+  if (!mqttClient.connected()) reconnectMQTT();
   mqttClient.loop();
 
-  // Eksekusi setiap 10 detik
+  // Task Rutin: Baca Sensor, Update LCD & Publish MQTT
   unsigned long now = millis();
   if (now - lastPublishTime >= PUBLISH_INTERVAL) {
     lastPublishTime = now;
@@ -219,40 +244,79 @@ void loop() {
     // 1. Baca Suhu Air (DS18B20)
     ds18b20.requestTemperatures();
     float suhu_air = ds18b20.getTempCByIndex(0);
-    if (suhu_air == DEVICE_DISCONNECTED_C) {
-      Serial.println("Gagal membaca DS18B20!");
-      suhu_air = 0.0f;
-    } else {
-      Serial.printf("Suhu Air (DS18B20): %.2f °C\n", suhu_air);
-    }
+    if (suhu_air == DEVICE_DISCONNECTED_C || suhu_air == -127.0) suhu_air = 0.0f;
 
-    // 2. Baca Suhu Lingkungan & Kelembaban (DHT)
+    // 2. Baca DHT
     float suhu_lingkungan = dht.readTemperature();
     float humidity = dht.readHumidity();
-    if (isnan(suhu_lingkungan) || isnan(humidity)) {
-      Serial.println("Gagal membaca DHT!");
-      suhu_lingkungan = 0.0f;
-      humidity = 0.0f;
+    if (isnan(suhu_lingkungan)) suhu_lingkungan = 0.0f;
+    if (isnan(humidity)) humidity = 0.0f;
+
+    // 3. Baca TDS ADC
+    int medianADC = getMedianNum(analogBuffer, SCOUNT);
+    float tds_val = (float)hitungPPMdarimodulHujan(medianADC);
+
+    // 4. Baca JSN Jarak
+    float jsn_val = bacaJarakJSN();
+    if (jsn_val < 0) jsn_val = 0.0f;
+
+    // 5. Placeholder / Dummy Values
+    float nitrat_val = 0.0f;
+    float do_val = 6.8f; // Dissolved Oxygen
+
+    // ================= UPDATE TAMPILAN LCD =================
+    
+    // A. SUHU AIR & DHT
+    tft.fillRect(8, 52, 146, 74, ILI9341_BLACK); 
+    tft.setCursor(12, 54);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(2);
+    if (suhu_air == 0.0f) {
+      tft.print("DS : ERR");
     } else {
-      Serial.printf("Suhu Lingkungan (DHT): %.2f °C | Kelembaban: %.2f %%\n", suhu_lingkungan, humidity);
+      tft.print("DS :"); tft.print(suhu_air, 1); tft.println(" C");
     }
 
-    // 3. Baca JSN-SR04T (Jarak / Ketinggian Air)
-    float jsn_val = readJSN();
-    Serial.printf("Jarak / Level Air (JSN-SR04T): %.2f cm\n", jsn_val);
+    tft.setCursor(12, 76);
+    tft.setTextSize(1);
+    tft.setTextColor(ILI9341_ORANGE);
+    tft.print("DHT :"); tft.print(suhu_lingkungan, 1); tft.println(" C");
+    tft.setCursor(12, 92);
+    tft.print("Hum :"); tft.print(humidity, 1); tft.println(" %");
 
-    // 4. Baca TDS Sensor (dengan kompensasi suhu_air)
-    float tds_val = readTDS(suhu_air);
-    Serial.printf("Nilai TDS: %.2f ppm\n", tds_val);
+    // B. TDS
+    tft.fillRect(166, 52, 146, 74, ILI9341_BLACK); 
+    tft.setCursor(170, 65);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(3);
+    tft.print((int)tds_val);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_GREEN);
+    tft.print(" PPM");
 
-    // 5. Placeholder Sensor Belum Terpasang
-    float nitrat_val = 0.0f;
-    float do_val = 0.0f;
+    // C. JARAK JSN
+    tft.fillRect(8, 155, 146, 75, ILI9341_BLACK); 
+    tft.setCursor(12, 168);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(3); 
+    tft.print(jsn_val, 1);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_CYAN);
+    tft.println(" cm");
 
-    // 6. Get Timestamp ISO8601
+    // D. OKSIGEN DO
+    tft.fillRect(166, 155, 146, 75, ILI9341_BLACK); 
+    tft.setCursor(170, 168);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(3);
+    tft.print(do_val, 1);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_MAGENTA);
+    tft.print(" mg/L");
+
+    // ================= PUBLISH MQTT JSON =================
     String timestampStr = getTimestamp();
 
-    // 7. Build JSON Payload
     StaticJsonDocument<256> doc;
     doc["tds"] = tds_val;
     doc["jsn"] = jsn_val;
@@ -265,14 +329,8 @@ void loop() {
     char jsonBuffer[256];
     serializeJson(doc, jsonBuffer);
 
-    Serial.print("Publish MQTT Payload: ");
+    Serial.print("Publish MQTT: ");
     Serial.println(jsonBuffer);
-
-    // 8. Publish to MQTT Topic
-    if (mqttClient.publish(MQTT_TOPIC, jsonBuffer)) {
-      Serial.println("Payload berhasil terkirim ke MQTT Broker!");
-    } else {
-      Serial.println("Gagal mengirim payload via MQTT.");
-    }
+    mqttClient.publish(MQTT_TOPIC, jsonBuffer);
   }
 }
