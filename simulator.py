@@ -8,7 +8,7 @@ from datetime import datetime, timezone # Ditambahkan untuk generate waktu ISO
 BROKER = 'broker.emqx.io'
 PORT = 1883
 
-ID_ALAT = 'ESP32-001' 
+ID_ALAT = 'ESP32-002' 
 
 TOPIC = f'tambak/{ID_ALAT}/sensor'
 

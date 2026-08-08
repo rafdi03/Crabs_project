@@ -32,7 +32,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
-#include "driver/adc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_rom_sys.h"
 
 // Library DHT (Component)
@@ -59,12 +59,13 @@ static const char *TAG = "TAMBAK_ESP32";
 #define JSN_TRIG_PIN   GPIO_NUM_18
 #define JSN_ECHO_PIN   GPIO_NUM_34
 
-#define TDS_ADC_CHANNEL ADC1_CHANNEL_3 // GPIO 39 (Sensor_VN)
+#define TDS_ADC_CHANNEL ADC_CHANNEL_3 // GPIO 39 (Sensor_VN)
 
 // Variabel Global
 static EventGroupHandle_t wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 
+static adc_oneshot_unit_handle_t tds_adc_handle = NULL;
 esp_mqtt_client_handle_t mqtt_client = NULL;
 static int wifi_retry_count = 0;
 static bool ds18b20_present = false;
@@ -260,8 +261,20 @@ static float jsn_read_distance(void) {
 static float tds_read_ppm(float water_temp) {
     const int SAMPLES = 10;
     uint32_t total_raw = 0;
+
+    if (tds_adc_handle == NULL) {
+        ESP_LOGE(TAG, "ADC handle belum diinisialisasi.");
+        return 0.0f;
+    }
+
     for (int i = 0; i < SAMPLES; i++) {
-        total_raw += adc1_get_raw(TDS_ADC_CHANNEL);
+        int adc_value = 0;
+        esp_err_t err = adc_oneshot_read(tds_adc_handle, TDS_ADC_CHANNEL, &adc_value);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ADC read gagal: %s", esp_err_to_name(err));
+            return 0.0f;
+        }
+        total_raw += (uint32_t)adc_value;
         vTaskDelay(pdMS_TO_TICKS(5));
     }
     float avg_raw = (float)total_raw / SAMPLES;
@@ -329,8 +342,18 @@ void hardware_init() {
     ESP_ERROR_CHECK(gpio_config(&io_conf_echo));
 
     // 3. Setup ADC untuk TDS (GPIO 39 / ADC1_CHANNEL_3)
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(TDS_ADC_CHANNEL, ADC_ATTEN_DB_11);
+    adc_oneshot_unit_init_cfg_t adc_cfg = {
+        .unit_id = ADC_UNIT_1,
+        .clk_src = ADC_RTC_CLK_SRC_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_cfg, &tds_adc_handle));
+
+    adc_oneshot_chan_cfg_t adc_chan_cfg = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(tds_adc_handle, TDS_ADC_CHANNEL, &adc_chan_cfg));
+
     ESP_LOGI(TAG, "ADC1 Channel 3 (GPIO 39) dikonfigurasi untuk TDS.");
 }
 

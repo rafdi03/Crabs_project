@@ -1151,7 +1151,8 @@
     <!-- WebSocket -->
     <script>
         function connectWebSocket() {
-            const socket = new WebSocket('ws://127.0.0.1:8000/ws/sensor/');
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
 
             socket.onopen = function() {
                 console.log('WebSocket terhubung.');
