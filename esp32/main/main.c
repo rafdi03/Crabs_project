@@ -381,55 +381,43 @@ static bool baca_dht22_langsung(gpio_num_t pin, float *humidity, float *temperat
 }
 
 // ==========================================
-// BACA JSN-SR04T (LEVEL / JARAK AIR) - AUTO DETECT IDLE HIGH (4V) & IDLE LOW (0V)
+// BACA JSN-SR04T (LEVEL / JARAK AIR)
 // ==========================================
 static float bacaJarakJSN(void) {
-    // 1. Cek kondisi level pin Echo sebelum trigger (Deteksi tipe modul & pull-up)
-    int idle_level = gpio_get_level(ECHO_PIN);
-
-    // 2. Kirim pulsa trigger 25us
+    // 1. Pastikan pin Trig LOW sebelum pulsa
     gpio_set_level(TRIG_PIN, 0);
     esp_rom_delay_us(10);
+
+    // 2. Berikan pulsa trigger 20us
     gpio_set_level(TRIG_PIN, 1);
     esp_rom_delay_us(25);
     gpio_set_level(TRIG_PIN, 0);
 
-    int64_t echo_start = 0;
-    int64_t echo_end = 0;
-
-    if (idle_level == 0) {
-        // Tipe A: Standar Active-HIGH (Idle 0V -> Pulsa Naik HIGH -> Turun ke 0V)
-        int64_t t_wait = esp_timer_get_time();
-        while (gpio_get_level(ECHO_PIN) == 0) {
-            if ((esp_timer_get_time() - t_wait) > 60000) return 0.0f;
-            esp_rom_delay_us(1);
+    // 3. Tunggu sinyal Echo naik ke level HIGH (Maksimal 70ms)
+    int64_t t_wait = esp_timer_get_time();
+    while (gpio_get_level(ECHO_PIN) == 0) {
+        if ((esp_timer_get_time() - t_wait) > 70000) {
+            return 0.0f; // Timeout / sensor tidak terpasang
         }
-        echo_start = esp_timer_get_time();
-        while (gpio_get_level(ECHO_PIN) == 1) {
-            if ((esp_timer_get_time() - echo_start) > 60000) return 0.0f;
-            esp_rom_delay_us(1);
-        }
-        echo_end = esp_timer_get_time();
-    } else {
-        // Tipe B: Active-LOW / Pull-up 4V (Idle 4V/HIGH -> Pulsa Turun LOW -> Naik ke HIGH)
-        int64_t t_wait = esp_timer_get_time();
-        while (gpio_get_level(ECHO_PIN) == 1) {
-            if ((esp_timer_get_time() - t_wait) > 60000) return 0.0f;
-            esp_rom_delay_us(1);
-        }
-        echo_start = esp_timer_get_time();
-        while (gpio_get_level(ECHO_PIN) == 0) {
-            if ((esp_timer_get_time() - echo_start) > 60000) return 0.0f;
-            esp_rom_delay_us(1);
-        }
-        echo_end = esp_timer_get_time();
+        esp_rom_delay_us(1);
     }
+
+    // 4. Ukur durasi sinyal Echo HIGH
+    int64_t echo_start = esp_timer_get_time();
+    while (gpio_get_level(ECHO_PIN) == 1) {
+        if ((esp_timer_get_time() - echo_start) > 70000) {
+            return 0.0f; // Sinyal Echo macet / timeout
+        }
+        esp_rom_delay_us(1);
+    }
+    int64_t echo_end = esp_timer_get_time();
 
     int64_t duration_us = echo_end - echo_start;
     float distance_cm = ((float)duration_us * 0.0343f) / 2.0f;
 
     // Rentang valid JSN-SR04T (15 cm s/d 450 cm)
     if (distance_cm >= 10.0f && distance_cm <= 500.0f) {
+        ESP_LOGI(TAG, "JSN Terbaca: %.2f cm (Durasi: %lld us)", distance_cm, (long long)duration_us);
         return distance_cm;
     }
     return 0.0f;
@@ -456,27 +444,16 @@ void hardware_init(void) {
     gpio_set_pull_mode(DHT_PIN, GPIO_PULLUP_ONLY);
     gpio_set_level(DHT_PIN, 1);
 
-    // 3. JSN-SR04T GPIO (Trig: D14, Echo: D27 dengan Internal Pull-Down agar 0 jika dicabut)
-    gpio_config_t io_conf_jsn = {
-        .pin_bit_mask = (1ULL << TRIG_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&io_conf_jsn);
+    // 3. JSN-SR04T GPIO (Trig: D14, Echo: D27)
+    gpio_reset_pin(TRIG_PIN);
+    gpio_set_direction(TRIG_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(TRIG_PIN, 0);
 
-    gpio_config_t io_conf_echo = {
-        .pin_bit_mask = (1ULL << ECHO_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&io_conf_echo);
+    gpio_reset_pin(ECHO_PIN);
+    gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(ECHO_PIN, GPIO_PULLDOWN_ONLY);
 
-    // 3. Inisialisasi ADC1 untuk Sensor TDS (GPIO 34 / ADC1_CHANNEL_6)
+    // 4. Inisialisasi ADC1 untuk Sensor TDS (GPIO 34 / ADC1_CHANNEL_6)
     adc_oneshot_unit_init_cfg_t adc_cfg = {
         .unit_id = ADC_UNIT_1,
         .ulp_mode = ADC_ULP_MODE_DISABLE,
@@ -597,7 +574,7 @@ void sensor_task(void *pvParameters) {
         static float last_tds_val = 0.0f;
         static int tds_fail_count = 0;
 
-        if (medianADC > 60 && medianADC < 3900) {
+        if (medianADC > 250 && medianADC < 3900) {
             float calculated_tds = hitungTDS_PPM(medianADC, suhu_air);
             // Exponential Smoothing Filter agar nilai TDS tidak melonjak drastis
             if (last_tds_val > 0.0f) {
