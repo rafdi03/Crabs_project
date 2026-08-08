@@ -49,8 +49,8 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DS18B20_PIN       GPIO_NUM_13   // Suhu Air
-#define DHT_PIN           GPIO_NUM_15   // Suhu & Kelembaban Lingkungan
+#define DS18B20_PIN       GPIO_NUM_15   // Suhu Air
+#define DHT_PIN           GPIO_NUM_13   // Suhu & Kelembaban Lingkungan
 #define DHT_TYPE          DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
 
 #define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
@@ -99,10 +99,24 @@ static int getMedianNum(int bArray[], int iFilterLen) {
     return bTemp;
 }
 
-static int hitungPPMdarimodulHujan(int adcRaw) {
-    long ppm = (long)(adcRaw - ADC_AIR_MURNI) * (PPM_AIR_KERAN - PPM_AIR_MURNI) / (ADC_AIR_KERAN - ADC_AIR_MURNI) + PPM_AIR_MURNI;
-    if (ppm < 0) ppm = 0;
-    return (int)ppm;
+static float hitungTDS_PPM(int adcRaw, float suhuAir) {
+    if (adcRaw <= 10) return 0.0f; // Nol jika tidak ada sinyal/terputus
+    
+    // Konversi ADC 12-bit (0-4095) ke Tegangan (0.0V - 3.3V)
+    float voltage = (float)adcRaw * (3.3f / 4095.0f);
+    
+    // Kompensasi suhu (standar 25°C)
+    float temp = (suhuAir > 0.0f && suhuAir < 80.0f) ? suhuAir : 25.0f;
+    float compensationCoefficient = 1.0f + 0.02f * (temp - 25.0f);
+    float compensationVoltage = voltage / compensationCoefficient;
+    
+    // Formula Kurva Karakteristik Gravity TDS Analog
+    float tdsValue = (133.42f * compensationVoltage * compensationVoltage * compensationVoltage 
+                    - 255.86f * compensationVoltage * compensationVoltage 
+                    + 857.39f * compensationVoltage) * 0.5f;
+                    
+    if (tdsValue < 0.0f) tdsValue = 0.0f;
+    return tdsValue;
 }
 
 // ==========================================
@@ -406,9 +420,10 @@ void sensor_task(void *pvParameters) {
         // 3. Baca JSN-SR04T (Jarak Air)
         float jsn_val = bacaJarakJSN();
 
-        // 4. Baca TDS dengan Median Filter & Kalibrasi Modul Hujan
+        // 4. Baca TDS dengan Median Filter & Kompensasi Suhu
         int medianADC = getMedianNum(analogBuffer, SCOUNT);
-        float tds_val = (float)hitungPPMdarimodulHujan(medianADC);
+        float tds_val = hitungTDS_PPM(medianADC, suhu_air);
+        float tds_voltage = (float)medianADC * (3.3f / 4095.0f);
 
         // 5. Sensor Lain
         float nitrat_val = 0.0f;
@@ -462,7 +477,7 @@ void sensor_task(void *pvParameters) {
         printf("  - Suhu Udara (DHT)   : %.2f °C\n", suhu_lingkungan);
         printf("  - Kelembaban (DHT)   : %.2f %%\n", kelembaban);
         printf("  - Level Air (JSN)    : %.2f cm\n", jsn_val);
-        printf("  - Kualitas Air (TDS) : %.2f PPM (ADC: %d)\n", tds_val, medianADC);
+        printf("  - Kualitas Air (TDS) : %.2f PPM (ADC: %d | %.2f V)\n", tds_val, medianADC, tds_voltage);
         printf("  - Oksigen Terlarut   : %.2f mg/L\n", do_val);
         printf("-------------------------------------------------------\n");
         printf(" MQTT Sensor    : %s\n", json_string);
