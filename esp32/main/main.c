@@ -381,37 +381,58 @@ static bool baca_dht22_langsung(gpio_num_t pin, float *humidity, float *temperat
 }
 
 // ==========================================
-// BACA JSN-SR04T (LEVEL / JARAK AIR)
+// BACA JSN-SR04T (LEVEL / JARAK AIR) - AUTO DETECT IDLE HIGH (4V) & IDLE LOW (0V)
 // ==========================================
 static float bacaJarakJSN(void) {
+    // 1. Cek kondisi level pin Echo sebelum trigger (Deteksi tipe modul & pull-up)
+    int idle_level = gpio_get_level(ECHO_PIN);
+
+    // 2. Kirim pulsa trigger 25us
     gpio_set_level(TRIG_PIN, 0);
     esp_rom_delay_us(10);
-
-    // Pulsa trigger 25us untuk modul JSN-SR04T
     gpio_set_level(TRIG_PIN, 1);
     esp_rom_delay_us(25);
     gpio_set_level(TRIG_PIN, 0);
 
-    int64_t start_time = esp_timer_get_time();
-    while (gpio_get_level(ECHO_PIN) == 0) {
-        if ((esp_timer_get_time() - start_time) > 60000) {
-            return 0.0f; // Sensor tidak terpasang / tidak ada respon
-        }
-        esp_rom_delay_us(2);
-    }
+    int64_t echo_start = 0;
+    int64_t echo_end = 0;
 
-    int64_t echo_start = esp_timer_get_time();
-    while (gpio_get_level(ECHO_PIN) == 1) {
-        if ((esp_timer_get_time() - echo_start) > 60000) {
-            return 0.0f;
+    if (idle_level == 0) {
+        // Tipe A: Standar Active-HIGH (Idle 0V -> Pulsa Naik HIGH -> Turun ke 0V)
+        int64_t t_wait = esp_timer_get_time();
+        while (gpio_get_level(ECHO_PIN) == 0) {
+            if ((esp_timer_get_time() - t_wait) > 60000) return 0.0f;
+            esp_rom_delay_us(1);
         }
-        esp_rom_delay_us(2);
+        echo_start = esp_timer_get_time();
+        while (gpio_get_level(ECHO_PIN) == 1) {
+            if ((esp_timer_get_time() - echo_start) > 60000) return 0.0f;
+            esp_rom_delay_us(1);
+        }
+        echo_end = esp_timer_get_time();
+    } else {
+        // Tipe B: Active-LOW / Pull-up 4V (Idle 4V/HIGH -> Pulsa Turun LOW -> Naik ke HIGH)
+        int64_t t_wait = esp_timer_get_time();
+        while (gpio_get_level(ECHO_PIN) == 1) {
+            if ((esp_timer_get_time() - t_wait) > 60000) return 0.0f;
+            esp_rom_delay_us(1);
+        }
+        echo_start = esp_timer_get_time();
+        while (gpio_get_level(ECHO_PIN) == 0) {
+            if ((esp_timer_get_time() - echo_start) > 60000) return 0.0f;
+            esp_rom_delay_us(1);
+        }
+        echo_end = esp_timer_get_time();
     }
-    int64_t echo_end = esp_timer_get_time();
 
     int64_t duration_us = echo_end - echo_start;
     float distance_cm = ((float)duration_us * 0.0343f) / 2.0f;
-    return (distance_cm >= 10.0f && distance_cm <= 500.0f) ? distance_cm : 0.0f;
+
+    // Rentang valid JSN-SR04T (15 cm s/d 450 cm)
+    if (distance_cm >= 10.0f && distance_cm <= 500.0f) {
+        return distance_cm;
+    }
+    return 0.0f;
 }
 
 // ==========================================
