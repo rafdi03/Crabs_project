@@ -324,6 +324,9 @@ void hardware_init(void) {
     gpio_config(&io_conf_ds);
     gpio_set_level(DS18B20_PIN, 1);
 
+    // 2. Inisialisasi Pull-Up GPIO DHT22 (D15)
+    gpio_set_pull_mode(DHT_PIN, GPIO_PULLUP_ONLY);
+
     // 2. JSN-SR04T GPIO (Trig: D15, Echo: D27)
     gpio_config_t io_conf_jsn = {
         .pin_bit_mask = (1ULL << TRIG_PIN),
@@ -378,13 +381,26 @@ void sensor_task(void *pvParameters) {
             suhu_air = 0.0f;
         }
 
-        // 2. Baca DHT22/DHT11
+        // 2. Baca DHT22 (dengan Auto-Retry & Fallback DHT11)
         float suhu_lingkungan = 0.0f;
         float kelembaban = 0.0f;
         esp_err_t res = dht_read_float_data(DHT_TYPE, DHT_PIN, &kelembaban, &suhu_lingkungan);
         if (res != ESP_OK) {
+            // Coba sekali lagi dengan jeda 200ms
+            vTaskDelay(pdMS_TO_TICKS(200));
+            res = dht_read_float_data(DHT_TYPE, DHT_PIN, &kelembaban, &suhu_lingkungan);
+            if (res != ESP_OK) {
+                // Jika masih gagal, coba fallback ke DHT11 (jika sensor fisik ternyata tipe DHT11)
+                res = dht_read_float_data(DHT_TYPE_DHT11, DHT_PIN, &kelembaban, &suhu_lingkungan);
+            }
+        }
+        if (res != ESP_OK) {
+            ESP_LOGW(TAG, "DHT Belum Terbaca di GPIO %d! Error: %s (0x%x). Pastikan Resistor Pull-up 4.7kΩ terpasang.", 
+                     DHT_PIN, esp_err_to_name(res), res);
             suhu_lingkungan = 0.0f;
             kelembaban = 0.0f;
+        } else {
+            ESP_LOGI(TAG, "DHT Sukses Terbaca: Suhu=%.1f °C, Kelembaban=%.1f %%", suhu_lingkungan, kelembaban);
         }
 
         // 3. Baca JSN-SR04T (Jarak Air)
