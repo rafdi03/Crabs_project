@@ -392,14 +392,14 @@ static float bacaJarakJSN(void) {
 
     int64_t start_time = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 0) {
-        if (esp_timer_get_time() - start_time > 30000) {
-            return 0.0f;
+        if (esp_timer_get_time() - start_time > 10000) {
+            return 0.0f; // Sensor tidak terpasang / tidak ada respon
         }
     }
 
     int64_t echo_start = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 1) {
-        if (esp_timer_get_time() - echo_start > 30000) {
+        if (esp_timer_get_time() - echo_start > 25000) {
             return 0.0f;
         }
     }
@@ -407,7 +407,7 @@ static float bacaJarakJSN(void) {
 
     int64_t duration_us = echo_end - echo_start;
     float distance_cm = (duration_us * 0.0343f) / 2.0f;
-    return (distance_cm > 0.0f && distance_cm < 600.0f) ? distance_cm : 0.0f;
+    return (distance_cm >= 5.0f && distance_cm <= 500.0f) ? distance_cm : 0.0f;
 }
 
 // ==========================================
@@ -431,7 +431,7 @@ void hardware_init(void) {
     gpio_set_pull_mode(DHT_PIN, GPIO_PULLUP_ONLY);
     gpio_set_level(DHT_PIN, 1);
 
-    // 2. JSN-SR04T GPIO (Trig: D15, Echo: D27)
+    // 3. JSN-SR04T GPIO (Trig: D14, Echo: D27 dengan Internal Pull-Down agar 0 jika dicabut)
     gpio_config_t io_conf_jsn = {
         .pin_bit_mask = (1ULL << TRIG_PIN),
         .mode = GPIO_MODE_OUTPUT,
@@ -446,7 +446,7 @@ void hardware_init(void) {
         .pin_bit_mask = (1ULL << ECHO_PIN),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf_echo);
@@ -553,12 +553,17 @@ void sensor_task(void *pvParameters) {
 
         // 4. Baca TDS dengan Median Filter & Kompensasi Suhu
         int medianADC = getMedianNum(analogBuffer, SCOUNT);
-        float tds_val = hitungTDS_PPM(medianADC, suhu_air);
+        float tds_val = 0.0f;
         float tds_voltage = (float)medianADC * (3.3f / 4095.0f);
+        if (medianADC > 60 && medianADC < 3900) {
+            tds_val = hitungTDS_PPM(medianADC, suhu_air);
+        } else {
+            tds_val = 0.0f;
+        }
 
-        // 5. Sensor Lain
+        // 5. Sensor Belum Terpasang (DO & Nitrat = 0.00)
         float nitrat_val = 0.0f;
-        float do_val = 6.8f; // Dummy / Dissolved Oxygen
+        float do_val = 0.0f;
 
         // 6. Update Layar LCD TFT ILI9342 (Modular)
         lcd_tft_update(suhu_air, suhu_lingkungan, kelembaban, tds_val, jsn_val, do_val);
