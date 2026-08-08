@@ -24,6 +24,8 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_rom_sys.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // Library DHT Component
 #include "dht.h"
@@ -120,6 +122,7 @@ void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_max_tx_power(50); // Mencegah lonjakan arus berlebih dari port USB
 }
 
 // ==========================================
@@ -417,6 +420,9 @@ void sensor_task(void *pvParameters) {
 // MAIN APP ENTRY
 // ==========================================
 void app_main(void) {
+    // Nonaktifkan hardware brownout detector untuk mencegah restart akibat drop tegangan sesaat dari USB
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
     // Redam semua log internal yang berisik, hanya tampilkan Warning & Error
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set("TAMBAK_ESP32", ESP_LOG_INFO);
