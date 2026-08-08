@@ -50,13 +50,13 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DHT_PIN           GPIO_NUM_13   // Suhu & Kelembaban Lingkungan (D15)
-#define DS18B20_PIN       GPIO_NUM_15   // Suhu Air (D13)
+#define DHT_PIN           GPIO_NUM_15   // Suhu & Kelembaban Lingkungan (D15)
+#define DS18B20_PIN       GPIO_NUM_13   // Suhu Air (D13)
 #define DHT_TYPE          DHT_TYPE_DHT22 // Format DHT22 / AM2302
 
 #define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (D34 / Analog In)
-#define TRIG_PIN          GPIO_NUM_14   // JSN-SR04T Trig
-#define ECHO_PIN          GPIO_NUM_27   // JSN-SR04T Echo
+#define TRIG_PIN          GPIO_NUM_14   // JSN-SR04T Trig (D14)
+#define ECHO_PIN          GPIO_NUM_27   // JSN-SR04T Echo (D27)
 
 // Kalibrasi ADC TDS / Modul Hujan
 const int ADC_AIR_MURNI  = 3800; 
@@ -385,29 +385,33 @@ static bool baca_dht22_langsung(gpio_num_t pin, float *humidity, float *temperat
 // ==========================================
 static float bacaJarakJSN(void) {
     gpio_set_level(TRIG_PIN, 0);
-    esp_rom_delay_us(2);
-    gpio_set_level(TRIG_PIN, 1);
     esp_rom_delay_us(10);
+
+    // Pulsa trigger 25us untuk modul JSN-SR04T
+    gpio_set_level(TRIG_PIN, 1);
+    esp_rom_delay_us(25);
     gpio_set_level(TRIG_PIN, 0);
 
     int64_t start_time = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 0) {
-        if (esp_timer_get_time() - start_time > 10000) {
+        if ((esp_timer_get_time() - start_time) > 60000) {
             return 0.0f; // Sensor tidak terpasang / tidak ada respon
         }
+        esp_rom_delay_us(2);
     }
 
     int64_t echo_start = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 1) {
-        if (esp_timer_get_time() - echo_start > 25000) {
+        if ((esp_timer_get_time() - echo_start) > 60000) {
             return 0.0f;
         }
+        esp_rom_delay_us(2);
     }
     int64_t echo_end = esp_timer_get_time();
 
     int64_t duration_us = echo_end - echo_start;
-    float distance_cm = (duration_us * 0.0343f) / 2.0f;
-    return (distance_cm >= 5.0f && distance_cm <= 500.0f) ? distance_cm : 0.0f;
+    float distance_cm = ((float)duration_us * 0.0343f) / 2.0f;
+    return (distance_cm >= 10.0f && distance_cm <= 500.0f) ? distance_cm : 0.0f;
 }
 
 // ==========================================
