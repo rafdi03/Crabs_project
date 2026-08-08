@@ -112,7 +112,17 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": ["rediss://default:gQAAAAAAAdVLAAIgcDJkMjIzYTRlNDVhNGE0Nzg4YmNlMjJkYjY5MjI0ZDU3Ng@new-tapir-120139.upstash.io:6379"], 
+            "hosts": [
+                {
+                    "address": "rediss://default:gQAAAAAAAdVLAAIgcDJkMjIzYTRlNDVhNGE0Nzg4YmNlMjJkYjY5MjI0ZDU3Ng@new-tapir-120139.upstash.io:6379",
+                    "health_check_interval": 10,
+                    "socket_timeout": 20,
+                    "socket_connect_timeout": 10,
+                    "retry_on_timeout": True,
+                }
+            ],
+            "capacity": 1500,
+            "expiry": 10,
         },
     },
 }
