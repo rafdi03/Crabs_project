@@ -13,19 +13,13 @@ extern "C" {
 // DEFINISI PIN 5-CHANNEL RELAY
 // ==========================================
 #define RELAY_1_PIN     GPIO_NUM_25  // Relay 1 (D25) - Pompa 1 / Aerator
-#define RELAY_2_PIN     GPIO_NUM_16  // Relay 2 (D16) - Pompa 2 / Aerator
-#define RELAY_3_PIN     GPIO_NUM_17  // Relay 3 (D17) - Pemanas / Heater
-#define RELAY_4_PIN     GPIO_NUM_13  // Relay 4 (D13) - Feeder Pakan
-#define RELAY_5_PIN     GPIO_NUM_14  // Relay 5 (D14) - Solenoid Valve / Cadangan
+#define RELAY_2_PIN     GPIO_NUM_26  // Relay 2 (D26) - Pompa 2 / Aerator
+#define RELAY_3_PIN     GPIO_NUM_32  // Relay 3 (D32) - Pemanas / Heater
+#define RELAY_4_PIN     GPIO_NUM_33  // Relay 4 (D33) - Feeder Pakan
+#define RELAY_5_PIN     GPIO_NUM_22  // Relay 5 (D22) - Solenoid Valve / Cadangan
 
 #define NUM_RELAYS      5
 
-// ==========================================
-// KONFIGURASI ACTIVE-LOW RELAY
-// Modul Relay Optocoupler Umum:
-// - Logic LOW (0)  = Relay Menyala / Terhubung (NO terhubung ke COM)
-// - Logic HIGH (1) = Relay Mati / Terputus
-// ==========================================
 #define RELAY_ON_LEVEL   0  // Aktif LOW (0V)
 #define RELAY_OFF_LEVEL  1  // Nonaktif HIGH (3.3V)
 

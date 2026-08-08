@@ -49,12 +49,12 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DS18B20_PIN       GPIO_NUM_4   // Suhu Air
-#define DHT_PIN           GPIO_NUM_21   // Suhu & Kelembaban Lingkungan
+#define DS18B20_PIN       GPIO_NUM_13   // Suhu Air
+#define DHT_PIN           GPIO_NUM_15   // Suhu & Kelembaban Lingkungan
 #define DHT_TYPE          DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
 
 #define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
-#define TRIG_PIN          GPIO_NUM_15   // JSN-SR04T Trig (Dipindah ke D15 agar D14 bebas untuk Relay 5)
+#define TRIG_PIN          GPIO_NUM_14   // JSN-SR04T Trig (Dipindah ke D15 agar D14 bebas untuk Relay 5)
 #define ECHO_PIN          GPIO_NUM_27   // JSN-SR04T Echo
 
 // Kalibrasi ADC TDS / Modul Hujan
@@ -132,8 +132,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     if (event->event_id == MQTT_EVENT_CONNECTED) {
         is_mqtt_connected = true;
         ESP_LOGI(TAG, "MQTT Terhubung ke broker!");
-        // Berlangganan (Subscribe) ke topik kontrol relay
-        esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_RELAY_SUB, 1);
+        
+        // Berlangganan HANYA ke topik perintah /set (Mencegah echo loop feedback)
+        esp_mqtt_client_subscribe(mqtt_client, "tambak/ESP32-001/relay/+/set", 1);
+        esp_mqtt_client_subscribe(mqtt_client, "tambak/ESP32-001/relay/all/set", 1);
+        esp_mqtt_client_subscribe(mqtt_client, "tambak/ESP32-001/relay/set", 1);
         
         // Kirim status awal relay ke broker
         char relay_json[128];
@@ -143,13 +146,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     } else if (event->event_id == MQTT_EVENT_DISCONNECTED) {
         is_mqtt_connected = false;
     } else if (event->event_id == MQTT_EVENT_DATA) {
-        // Menerima perintah kontrol relay secara asinkron (FreeRTOS)
-        relay_parse_mqtt_command(event->topic, event->topic_len, event->data, event->data_len);
-        
-        // Kirim feedback state relay terbaru
-        char relay_json[128];
-        relay_get_json_status(relay_json, sizeof(relay_json));
-        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_RELAY_STATE, relay_json, 0, 1, 0);
+        char topic_str[128];
+        int tlen = (event->topic_len < sizeof(topic_str) - 1) ? event->topic_len : sizeof(topic_str) - 1;
+        memcpy(topic_str, event->topic, tlen);
+        topic_str[tlen] = '\0';
+
+        // Hanya proses jika topik mengandung "/set"
+        if (strstr(topic_str, "/set")) {
+            relay_parse_mqtt_command(event->topic, event->topic_len, event->data, event->data_len);
+            
+            // Beri jeda kecil agar hardware stabil sebelum publish state feedback
+            vTaskDelay(pdMS_TO_TICKS(50));
+            char relay_json[128];
+            relay_get_json_status(relay_json, sizeof(relay_json));
+            esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_RELAY_STATE, relay_json, 0, 1, 0);
+        }
     }
 }
 

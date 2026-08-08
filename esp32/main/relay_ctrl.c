@@ -1,6 +1,6 @@
 /*
  * relay_ctrl.c - 5-Channel Relay Controller with FreeRTOS Queue & MQTT Commands
- * Konfigurasi: ACTIVE-LOW (0 = ON, 1 = OFF)
+ * Konfigurasi: ACTIVE-LOW (0 = ON, 1 = OFF) + Anti-Chatter Protection
  */
 
 #include "relay_ctrl.h"
@@ -14,13 +14,13 @@
 
 static const char *TAG = "RELAY_CTRL";
 
-// Konfigurasi pin relay dalam array sesuai permintaan user
+// Konfigurasi pin relay dalam array sesuai file header pengguna
 static const gpio_num_t relay_pins[NUM_RELAYS] = {
-    RELAY_1_PIN, // D25 - Pompa 1
-    RELAY_2_PIN, // D16 - Pompa 2
-    RELAY_3_PIN, // D17 - Heater
-    RELAY_4_PIN, // D13 - Feeder
-    RELAY_5_PIN  // D14 - Valve
+    RELAY_1_PIN,
+    RELAY_2_PIN,
+    RELAY_3_PIN,
+    RELAY_4_PIN,
+    RELAY_5_PIN
 };
 
 // Status aktual masing-masing relay (false = OFF, true = ON)
@@ -39,14 +39,11 @@ static void relay_task(void *pvParameters) {
         if (xQueueReceive(relay_cmd_queue, &cmd, portMAX_DELAY) == pdTRUE) {
             if (cmd.relay_num >= 1 && cmd.relay_num <= NUM_RELAYS) {
                 relay_set_state(cmd.relay_num, cmd.state);
-                ESP_LOGI(TAG, "[RTOS Task - Active LOW] Relay %d berhasil diubah -> %s (GPIO=%d)", 
-                         cmd.relay_num, cmd.state ? "ON [LOW=0]" : "OFF [HIGH=1]", 
-                         cmd.state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
             } else if (cmd.relay_num == 0) { // 0 = Semua Relay Sekaligus
                 for (int i = 1; i <= NUM_RELAYS; i++) {
                     relay_set_state(i, cmd.state);
                 }
-                ESP_LOGI(TAG, "[RTOS Task - Active LOW] Semua Relay (1-5) diubah -> %s", cmd.state ? "ON [LOW=0]" : "OFF [HIGH=1]");
+                ESP_LOGI(TAG, "[RTOS Task] Semua Relay diubah -> %s", cmd.state ? "ON [0]" : "OFF [1]");
             }
         }
     }
@@ -54,7 +51,7 @@ static void relay_task(void *pvParameters) {
 
 // Inisialisasi Hardware Relay & RTOS Queue
 void relay_ctrl_init(void) {
-    ESP_LOGI(TAG, "Inisialisasi 5-Channel Relay (D25, D16, D17, D13, D14) - Mode: ACTIVE-LOW...");
+    ESP_LOGI(TAG, "Inisialisasi 5-Channel Relay (Mode: ACTIVE-LOW)...");
 
     uint64_t pin_mask = 0;
     for (int i = 0; i < NUM_RELAYS; i++) {
@@ -70,26 +67,35 @@ void relay_ctrl_init(void) {
     };
     gpio_config(&io_conf);
 
-    // Set kondisi awal semua relay OFF (Set HIGH untuk Active-LOW)
+    // Set kondisi awal semua relay OFF (Set Level 1 / HIGH untuk Active-LOW)
     for (int i = 0; i < NUM_RELAYS; i++) {
         gpio_set_level(relay_pins[i], RELAY_OFF_LEVEL);
         relay_states[i] = false;
     }
 
     // Buat FreeRTOS Queue (Kapasitas 10 antrean perintah)
-    relay_cmd_queue = xQueueCreate(10, sizeof(relay_cmd_t));
+    if (relay_cmd_queue == NULL) {
+        relay_cmd_queue = xQueueCreate(10, sizeof(relay_cmd_t));
+    }
 
-    // Jalankan task Relay di Core 1 / background priority 6
+    // Jalankan task Relay di background priority 6
     xTaskCreate(relay_task, "relay_task", 2048, NULL, 6, NULL);
 }
 
-// Mengubah fisik pin relay secara langsung dengan logic Active-LOW
+// Mengubah fisik pin relay secara langsung dengan logic Active-LOW & Anti-Chatter
 void relay_set_state(uint8_t relay_num, bool state) {
     if (relay_num < 1 || relay_num > NUM_RELAYS) return;
     int idx = relay_num - 1;
+
+    // Proteksi Anti-Chatter: Abaikan jika state sudah sama agar relay tidak bergetar / loop
+    if (relay_states[idx] == state) {
+        return;
+    }
+
     relay_states[idx] = state;
-    // Active LOW: state=true -> 0 (ON), state=false -> 1 (OFF)
+    // Active LOW: state=true -> 0 (ON / 0V), state=false -> 1 (OFF / 3.3V)
     gpio_set_level(relay_pins[idx], state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
+    ESP_LOGI(TAG, "Relay %d (GPIO %d) -> %s", relay_num, relay_pins[idx], state ? "ON [LOW=0]" : "OFF [HIGH=1]");
 }
 
 // Mendapatkan status relay (true = ON, false = OFF)
@@ -130,6 +136,11 @@ void relay_parse_mqtt_command(const char *topic, int topic_len, const char *data
     memcpy(data_buf, data, d_len);
     data_buf[d_len] = '\0';
 
+    // Abaikan jika bukan topik perintah /set (Mencegah recursive loop jika menerima topic state)
+    if (strstr(topic_buf, "/set") == NULL) {
+        return;
+    }
+
     ESP_LOGI(TAG, "Menerima Perintah MQTT -> Topic: %s | Data: %s", topic_buf, data_buf);
 
     // Format 1: Topic Spesifik per Relay (misal: "tambak/ESP32-001/relay/1/set" s/d "5/set")
@@ -150,7 +161,7 @@ void relay_parse_mqtt_command(const char *topic, int topic_len, const char *data
         return;
     }
 
-    // Format 3: Payload JSON (misal: {"relay": 1, "state": 1} atau {"r1":1, "r2":0, ...})
+    // Format 3: Payload JSON tunggal {"relay": 1, "state": 1}
     char *relay_key = strstr(data_buf, "\"relay\"");
     char *state_key = strstr(data_buf, "\"state\"");
     if (relay_key && state_key) {
@@ -160,19 +171,6 @@ void relay_parse_mqtt_command(const char *topic, int topic_len, const char *data
             if (sscanf(state_key, "\"state\":%d", &r_st) == 1 || sscanf(state_key, "\"state\": %d", &r_st) == 1) {
                 relay_send_cmd_queue(r_num, (r_st == 1));
                 return;
-            }
-        }
-    }
-
-    // Format 4: Batch JSON Keys (r1 s/d r5)
-    for (int i = 1; i <= NUM_RELAYS; i++) {
-        char r_key[16];
-        snprintf(r_key, sizeof(r_key), "\"r%d\":", i);
-        char *p = strstr(data_buf, r_key);
-        if (p) {
-            int st = 0;
-            if (sscanf(p + strlen(r_key), "%d", &st) == 1) {
-                relay_send_cmd_queue(i, (st == 1));
             }
         }
     }
