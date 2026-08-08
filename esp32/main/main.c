@@ -495,10 +495,22 @@ void sensor_task(void *pvParameters) {
             ESP_LOGW(TAG, "Peringatan pembacaan ADC (D34): %s", esp_err_to_name(last_read_err));
         }
 
-        // 1. Baca Suhu Air (DS18B20)
+        // 1. Baca Suhu Air (DS18B20 pada D13) dengan Critical Section & Smart Hold Filter
         float suhu_air = 0.0f;
-        if (!ds18b20_read_temperature(&suhu_air)) {
-            suhu_air = 0.0f;
+        bool ds_ok = ds18b20_read_temperature(&suhu_air);
+        static float last_suhu_air = 0.0f;
+        static int ds_fail_count = 0;
+
+        if (ds_ok && suhu_air > 0.0f && suhu_air < 100.0f) {
+            last_suhu_air = suhu_air;
+            ds_fail_count = 0;
+        } else {
+            ds_fail_count++;
+            if (ds_fail_count < 4 && last_suhu_air > 0.0f) {
+                suhu_air = last_suhu_air;
+            } else {
+                suhu_air = 0.0f;
+            }
         }
 
         // 2. Baca DHT22 pada D15 (Direct Microsecond Bit-Banging + Library Fallback)
@@ -536,29 +548,48 @@ void sensor_task(void *pvParameters) {
             }
         }
 
-        // 3. Baca JSN-SR04T (Jarak Air)
+        // 3. Baca JSN-SR04T (Jarak Air) dengan Filter Pantulan & Smart Hold
         float jsn_val = bacaJarakJSN();
         static float last_jsn_val = 0.0f;
         static int jsn_fail_count = 0;
 
-        if (jsn_val > 5.0f && jsn_val < 500.0f) {
+        if (jsn_val >= 5.0f && jsn_val <= 500.0f) {
             last_jsn_val = jsn_val;
             jsn_fail_count = 0;
         } else {
             jsn_fail_count++;
             if (jsn_fail_count < 4 && last_jsn_val > 0.0f) {
                 jsn_val = last_jsn_val;
+            } else {
+                jsn_val = 0.0f;
             }
         }
 
-        // 4. Baca TDS dengan Median Filter & Kompensasi Suhu
+        // 4. Baca TDS (GPIO 34) dengan 20-Sample Median Filter & Kompensasi Suhu
         int medianADC = getMedianNum(analogBuffer, SCOUNT);
         float tds_val = 0.0f;
         float tds_voltage = (float)medianADC * (3.3f / 4095.0f);
+        static float last_tds_val = 0.0f;
+        static int tds_fail_count = 0;
+
         if (medianADC > 60 && medianADC < 3900) {
-            tds_val = hitungTDS_PPM(medianADC, suhu_air);
+            float calculated_tds = hitungTDS_PPM(medianADC, suhu_air);
+            // Exponential Smoothing Filter agar nilai TDS tidak melonjak drastis
+            if (last_tds_val > 0.0f) {
+                tds_val = 0.7f * calculated_tds + 0.3f * last_tds_val;
+            } else {
+                tds_val = calculated_tds;
+            }
+            last_tds_val = tds_val;
+            tds_fail_count = 0;
         } else {
-            tds_val = 0.0f;
+            tds_fail_count++;
+            if (tds_fail_count < 3 && last_tds_val > 0.0f) {
+                tds_val = last_tds_val;
+            } else {
+                tds_val = 0.0f;
+                last_tds_val = 0.0f;
+            }
         }
 
         // 5. Sensor Belum Terpasang (DO & Nitrat = 0.00)
