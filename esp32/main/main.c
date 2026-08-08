@@ -27,10 +27,11 @@
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// Modul Modular DHT, LCD TFT & FreeRTOS Relay Controller
+// Modul Modular DHT, LCD TFT, FreeRTOS Relay Controller & SD Card Logger
 #include "dht.h"
 #include "lcd_tft.h"
 #include "relay_ctrl.h"
+#include "flash_eks.h"
 
 static const char *TAG = "TAMBAK_ESP32";
 
@@ -471,14 +472,19 @@ void sensor_task(void *pvParameters) {
             }
         }
 
-        // 10. Info RAM & Status 5 Relay
+        // 10. Simpan Asinkron ke SD Card (FreeRTOS Background Queue - Tidak Pernah Memblokir Sensor/Relay/MQTT)
+        flash_eks_log_async(timestamp, do_val, suhu_air, tds_val, jsn_val, suhu_lingkungan, kelembaban,
+                            relay_get_state(1), relay_get_state(2), relay_get_state(3), relay_get_state(4), relay_get_state(5));
+
+        // 11. Info RAM & Status 5 Relay
         uint32_t free_heap_kb = esp_get_free_heap_size() / 1024;
         printf("\n=======================================================\n");
-        printf(" [MONITORING TAMBAK - ESP32 & 5 RELAY RTOS & LCD]      \n");
+        printf(" [MONITORING TAMBAK - ESP32 & 5 RELAY RTOS & SD CARD]  \n");
         printf("=======================================================\n");
         printf(" Waktu NTP      : %s\n", timestamp);
         printf(" WiFi Status    : %s (IP: %s)\n", is_wifi_connected ? "TERHUBUNG" : "TERPUTUS", ip_address_str);
         printf(" MQTT Status    : %s (%s)\n", is_mqtt_connected ? "TERHUBUNG" : "TERPUTUS", MQTT_BROKER);
+        printf(" SD Card Logger : %s (%s)\n", flash_eks_is_mounted() ? "TERHUBUNG [MENYIMPAN KE CSV]" : "TIDAK TERPASANG (NORMAL)", SD_LOG_FILE);
         printf(" Sisa RAM (Heap): %lu KB\n", (unsigned long)free_heap_kb);
         printf("-------------------------------------------------------\n");
         printf(" STATUS 5 RELAY (FreeRTOS):\n");
@@ -514,8 +520,9 @@ void app_main(void) {
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set("TAMBAK_ESP32", ESP_LOG_INFO);
     esp_log_level_set("RELAY_CTRL", ESP_LOG_INFO);
+    esp_log_level_set("FLASH_EKS", ESP_LOG_INFO);
 
-    printf("\n>>> MEMULAI MONITORING TAMBAK ESP32 (RTOS MULTI-TASKING) <<<\n");
+    printf("\n>>> MEMULAI MONITORING TAMBAK ESP32 (RTOS MULTI-TASKING & SD CARD) <<<\n");
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -523,11 +530,12 @@ void app_main(void) {
         nvs_flash_init();
     }
 
-    // Inisialisasi Hardware, Relay Task (FreeRTOS) & LCD TFT
+    // Inisialisasi Hardware, Relay Task (FreeRTOS), LCD TFT & SD Card (flash_eks)
     relay_ctrl_init();
     hardware_init();
     lcd_tft_init();
     lcd_tft_draw_layout();
+    flash_eks_init();
 
     wifi_init_sta();
 
