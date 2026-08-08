@@ -1,6 +1,6 @@
 /*
  * ESP-IDF Main C File: monitoring_tambak
- * Integrasi Modular: DS18B20, DHT22, TDS, JSN-SR04T, MQTT & LCD TFT ILI9342
+ * Integrasi Lengkap: DS18B20, DHT22, TDS, JSN-SR04T, 5-Channel Relay (FreeRTOS), MQTT & LCD TFT
  */
 
 #include <stdio.h>
@@ -27,31 +27,35 @@
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// Library DHT Component & Modular LCD TFT
+// Modul Modular DHT, LCD TFT & FreeRTOS Relay Controller
 #include "dht.h"
 #include "lcd_tft.h"
+#include "relay_ctrl.h"
 
 static const char *TAG = "TAMBAK_ESP32";
 
 // ==========================================
 // KONFIGURASI WIFI & MQTT
 // ==========================================
-#define WIFI_SSID      "Bayu"
-#define WIFI_PASS      "12345678"
-#define MQTT_BROKER    "mqtt://broker.emqx.io:1883"
-#define DEVICE_ID      "ESP32-001"
-#define MQTT_TOPIC     "tambak/ESP32-001/sensor"
+#define WIFI_SSID         "Bayu"
+#define WIFI_PASS         "12345678"
+#define MQTT_BROKER       "mqtt://broker.emqx.io:1883"
+#define DEVICE_ID         "ESP32-001"
+
+#define MQTT_TOPIC_SENSOR "tambak/ESP32-001/sensor"
+#define MQTT_TOPIC_RELAY_SUB "tambak/ESP32-001/relay/#"
+#define MQTT_TOPIC_RELAY_STATE "tambak/ESP32-001/relay/state"
 
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DS18B20_PIN    GPIO_NUM_33   // Suhu Air
-#define DHT_PIN        GPIO_NUM_32   // Suhu & Kelembaban Lingkungan
-#define DHT_TYPE       DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
+#define DS18B20_PIN       GPIO_NUM_33   // Suhu Air
+#define DHT_PIN           GPIO_NUM_32   // Suhu & Kelembaban Lingkungan
+#define DHT_TYPE          DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
 
-#define TDS_ADC_CHANNEL ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
-#define TRIG_PIN       GPIO_NUM_14   // JSN-SR04T Trig
-#define ECHO_PIN       GPIO_NUM_27   // JSN-SR04T Echo
+#define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
+#define TRIG_PIN          GPIO_NUM_15   // JSN-SR04T Trig (Dipindah ke D15 agar D14 bebas untuk Relay 5)
+#define ECHO_PIN          GPIO_NUM_27   // JSN-SR04T Echo
 
 // Kalibrasi ADC TDS / Modul Hujan
 const int ADC_AIR_MURNI  = 3800; 
@@ -61,7 +65,6 @@ const int PPM_AIR_KERAN  = 150;
 
 #define SCOUNT 20
 static int analogBuffer[SCOUNT];
-static int analogBufferIndex = 0;
 
 // Variabel Global Status
 static EventGroupHandle_t wifi_event_group;
@@ -121,12 +124,32 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+// ==========================================
+// MQTT EVENT HANDLER & RELAY RECV COMMAND
+// ==========================================
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_mqtt_event_handle_t event = event_data;
     if (event->event_id == MQTT_EVENT_CONNECTED) {
         is_mqtt_connected = true;
+        ESP_LOGI(TAG, "MQTT Terhubung ke broker!");
+        // Berlangganan (Subscribe) ke topik kontrol relay
+        esp_mqtt_client_subscribe(mqtt_client, MQTT_TOPIC_RELAY_SUB, 1);
+        
+        // Kirim status awal relay ke broker
+        char relay_json[128];
+        relay_get_json_status(relay_json, sizeof(relay_json));
+        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_RELAY_STATE, relay_json, 0, 1, 0);
+
     } else if (event->event_id == MQTT_EVENT_DISCONNECTED) {
         is_mqtt_connected = false;
+    } else if (event->event_id == MQTT_EVENT_DATA) {
+        // Menerima perintah kontrol relay secara asinkron (FreeRTOS)
+        relay_parse_mqtt_command(event->topic, event->topic_len, event->data, event->data_len);
+        
+        // Kirim feedback state relay terbaru
+        char relay_json[128];
+        relay_get_json_status(relay_json, sizeof(relay_json));
+        esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_RELAY_STATE, relay_json, 0, 1, 0);
     }
 }
 
@@ -153,7 +176,7 @@ void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_max_tx_power(50); // Mencegah drop tegangan USB
+    esp_wifi_set_max_tx_power(50);
 }
 
 void initialize_sntp(void) {
@@ -227,8 +250,8 @@ static uint8_t ds18b20_read_byte(void) {
 
 static bool ds18b20_read_temperature(float *temperature) {
     if (!ds18b20_reset()) return false;
-    ds18b20_write_byte(0xCC); // Skip ROM
-    ds18b20_write_byte(0x44); // Start conversion
+    ds18b20_write_byte(0xCC);
+    ds18b20_write_byte(0x44);
 
     vTaskDelay(pdMS_TO_TICKS(750));
 
@@ -290,7 +313,7 @@ void hardware_init(void) {
     gpio_config(&io_conf_ds);
     gpio_set_level(DS18B20_PIN, 1);
 
-    // 2. JSN-SR04T GPIO (Trig: 14, Echo: 27)
+    // 2. JSN-SR04T GPIO (Trig: D15, Echo: D27)
     gpio_config_t io_conf_jsn = {
         .pin_bit_mask = (1ULL << TRIG_PIN),
         .mode = GPIO_MODE_OUTPUT,
@@ -375,7 +398,7 @@ void sensor_task(void *pvParameters) {
         char timestamp[64];
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
-        // 8. Format JSON Payload
+        // 8. Format JSON Payload Sensor
         char json_string[256];
         snprintf(json_string, sizeof(json_string),
             "{\"tds\":%.2f,\"jsn\":%.2f,\"nitrat\":%.2f,\"do\":%.2f,\"suhu_air\":%.2f,\"suhu_lingkungan\":%.2f,\"timestamp\":\"%s\"}",
@@ -384,21 +407,28 @@ void sensor_task(void *pvParameters) {
         // 9. Kirim ke MQTT
         bool publish_success = false;
         if (mqtt_client != NULL && is_mqtt_connected) {
-            int msg_id = esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC, json_string, 0, 1, 0);
+            int msg_id = esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_SENSOR, json_string, 0, 1, 0);
             if (msg_id >= 0) {
                 publish_success = true;
             }
         }
 
-        // 10. Info RAM & Terminal Output Ringkas
+        // 10. Info RAM & Status 5 Relay
         uint32_t free_heap_kb = esp_get_free_heap_size() / 1024;
         printf("\n=======================================================\n");
-        printf(" [MONITORING TAMBAK - ESP32 & MODULAR LCD TFT]  \n");
+        printf(" [MONITORING TAMBAK - ESP32 & 5 RELAY RTOS & LCD]      \n");
         printf("=======================================================\n");
         printf(" Waktu NTP      : %s\n", timestamp);
         printf(" WiFi Status    : %s (IP: %s)\n", is_wifi_connected ? "TERHUBUNG" : "TERPUTUS", ip_address_str);
         printf(" MQTT Status    : %s (%s)\n", is_mqtt_connected ? "TERHUBUNG" : "TERPUTUS", MQTT_BROKER);
         printf(" Sisa RAM (Heap): %lu KB\n", (unsigned long)free_heap_kb);
+        printf("-------------------------------------------------------\n");
+        printf(" STATUS 5 RELAY (FreeRTOS):\n");
+        printf("  - Relay 1 (D25) : %s\n", relay_get_state(1) ? "ON  [AKTIF]" : "OFF [MATI]");
+        printf("  - Relay 2 (D16) : %s\n", relay_get_state(2) ? "ON  [AKTIF]" : "OFF [MATI]");
+        printf("  - Relay 3 (D17) : %s\n", relay_get_state(3) ? "ON  [AKTIF]" : "OFF [MATI]");
+        printf("  - Relay 4 (D13) : %s\n", relay_get_state(4) ? "ON  [AKTIF]" : "OFF [MATI]");
+        printf("  - Relay 5 (D14) : %s\n", relay_get_state(5) ? "ON  [AKTIF]" : "OFF [MATI]");
         printf("-------------------------------------------------------\n");
         printf(" HASIL SENSOR & UPDATE LCD:\n");
         printf("  - Suhu Air (DS18B20) : %.2f °C\n", suhu_air);
@@ -408,7 +438,7 @@ void sensor_task(void *pvParameters) {
         printf("  - Kualitas Air (TDS) : %.2f PPM (ADC: %d)\n", tds_val, medianADC);
         printf("  - Oksigen Terlarut   : %.2f mg/L\n", do_val);
         printf("-------------------------------------------------------\n");
-        printf(" MQTT Payload   : %s\n", json_string);
+        printf(" MQTT Sensor    : %s\n", json_string);
         printf(" Status Publish : %s\n", publish_success ? "BERHASIL [OK]" : "GAGAL / MENUNGGU KONEKSI");
         printf("=======================================================\n");
 
@@ -425,8 +455,9 @@ void app_main(void) {
 
     esp_log_level_set("*", ESP_LOG_WARN);
     esp_log_level_set("TAMBAK_ESP32", ESP_LOG_INFO);
+    esp_log_level_set("RELAY_CTRL", ESP_LOG_INFO);
 
-    printf("\n>>> MEMULAI SISTEM MONITORING TAMBAK ESP32 (MODULAR) <<<\n");
+    printf("\n>>> MEMULAI MONITORING TAMBAK ESP32 (RTOS MULTI-TASKING) <<<\n");
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -434,7 +465,8 @@ void app_main(void) {
         nvs_flash_init();
     }
 
-    // Inisialisasi Hardware Sensor & Modular LCD
+    // Inisialisasi Hardware, Relay Task (FreeRTOS) & LCD TFT
+    relay_ctrl_init();
     hardware_init();
     lcd_tft_init();
     lcd_tft_draw_layout();
@@ -452,6 +484,6 @@ void app_main(void) {
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(mqtt_client);
 
-    // Jalankan Task Sensor & Update LCD
+    // Jalankan Task Sensor & Update LCD (Priority 5)
     xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 5, NULL);
 }
