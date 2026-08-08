@@ -361,17 +361,26 @@ void hardware_init(void) {
     };
     gpio_config(&io_conf_echo);
 
-    // 3. ADC untuk TDS Sensor (GPIO 34 / ADC1_CHANNEL_6)
+    // 3. Inisialisasi ADC1 untuk Sensor TDS (GPIO 34 / ADC1_CHANNEL_6)
     adc_oneshot_unit_init_cfg_t adc_cfg = {
         .unit_id = ADC_UNIT_1,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
-    adc_oneshot_new_unit(&adc_cfg, &tds_adc_handle);
+    esp_err_t err_unit = adc_oneshot_new_unit(&adc_cfg, &tds_adc_handle);
+    if (err_unit != ESP_OK) {
+        ESP_LOGE(TAG, "Gagal inisialisasi ADC1 unit: %s", esp_err_to_name(err_unit));
+    }
 
     adc_oneshot_chan_cfg_t adc_chan_cfg = {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_12,
     };
-    adc_oneshot_config_channel(tds_adc_handle, TDS_ADC_CHANNEL, &adc_chan_cfg);
+    esp_err_t err_chan = adc_oneshot_config_channel(tds_adc_handle, TDS_ADC_CHANNEL, &adc_chan_cfg);
+    if (err_chan != ESP_OK) {
+        ESP_LOGE(TAG, "Gagal konfigurasi Channel ADC1 (GPIO 34): %s", esp_err_to_name(err_chan));
+    } else {
+        ESP_LOGI(TAG, "ADC1 Channel 6 (GPIO 34 / D34) Berhasil Dikonfigurasi (0 - 3.3V Full Range).");
+    }
 }
 
 // ==========================================
@@ -379,14 +388,21 @@ void hardware_init(void) {
 // ==========================================
 void sensor_task(void *pvParameters) {
     while (1) {
-        // Sample ADC TDS (20 samples for median)
+        // Sample ADC TDS (20 samples for median filter)
+        int last_read_err = ESP_OK;
         for (int i = 0; i < SCOUNT; i++) {
             int adc_val = 0;
             if (tds_adc_handle != NULL) {
-                adc_oneshot_read(tds_adc_handle, TDS_ADC_CHANNEL, &adc_val);
+                esp_err_t r = adc_oneshot_read(tds_adc_handle, TDS_ADC_CHANNEL, &adc_val);
+                if (r != ESP_OK) {
+                    last_read_err = r;
+                }
             }
             analogBuffer[i] = adc_val;
             vTaskDelay(pdMS_TO_TICKS(15));
+        }
+        if (last_read_err != ESP_OK) {
+            ESP_LOGW(TAG, "Peringatan pembacaan ADC (D34): %s", esp_err_to_name(last_read_err));
         }
 
         // 1. Baca Suhu Air (DS18B20)
