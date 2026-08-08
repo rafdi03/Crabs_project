@@ -14,8 +14,8 @@ extern "C" {
 // (Bebas bentrok dengan 5 pin Relay: 25, 16, 17, 13, 14)
 // ==========================================
 #define TFT_CS_PIN     GPIO_NUM_5
-#define TFT_DC_PIN     GPIO_NUM_4   // Dipindah ke D4 agar D17 bebas untuk Relay
-#define TFT_RST_PIN    GPIO_NUM_2   // Dipindah ke D2 agar D16 bebas untuk Relay
+#define TFT_DC_PIN     GPIO_NUM_17   // Dipindah ke D4 agar D17 bebas untuk Relay
+#define TFT_RST_PIN    GPIO_NUM_16   // Dipindah ke D2 agar D16 bebas untuk Relay
 #define TFT_MOSI_PIN   GPIO_NUM_23
 #define TFT_SCLK_PIN   GPIO_NUM_18
 

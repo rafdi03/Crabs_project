@@ -1,5 +1,6 @@
 /*
  * relay_ctrl.c - 5-Channel Relay Controller with FreeRTOS Queue & MQTT Commands
+ * Konfigurasi: ACTIVE-LOW (0 = ON, 1 = OFF)
  */
 
 #include "relay_ctrl.h"
@@ -13,13 +14,13 @@
 
 static const char *TAG = "RELAY_CTRL";
 
-// Konfigurasi pin relay dalam array
+// Konfigurasi pin relay dalam array sesuai permintaan user
 static const gpio_num_t relay_pins[NUM_RELAYS] = {
-    RELAY_1_PIN, // D25
-    RELAY_2_PIN, // D16
-    RELAY_3_PIN, // D17
-    RELAY_4_PIN, // D13
-    RELAY_5_PIN  // D14
+    RELAY_1_PIN, // D25 - Pompa 1
+    RELAY_2_PIN, // D16 - Pompa 2
+    RELAY_3_PIN, // D17 - Heater
+    RELAY_4_PIN, // D13 - Feeder
+    RELAY_5_PIN  // D14 - Valve
 };
 
 // Status aktual masing-masing relay (false = OFF, true = ON)
@@ -38,13 +39,14 @@ static void relay_task(void *pvParameters) {
         if (xQueueReceive(relay_cmd_queue, &cmd, portMAX_DELAY) == pdTRUE) {
             if (cmd.relay_num >= 1 && cmd.relay_num <= NUM_RELAYS) {
                 relay_set_state(cmd.relay_num, cmd.state);
-                ESP_LOGI(TAG, "[RTOS Task] Relay %d berhasil diubah -> %s", 
-                         cmd.relay_num, cmd.state ? "ON" : "OFF");
+                ESP_LOGI(TAG, "[RTOS Task - Active LOW] Relay %d berhasil diubah -> %s (GPIO=%d)", 
+                         cmd.relay_num, cmd.state ? "ON [LOW=0]" : "OFF [HIGH=1]", 
+                         cmd.state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
             } else if (cmd.relay_num == 0) { // 0 = Semua Relay Sekaligus
                 for (int i = 1; i <= NUM_RELAYS; i++) {
                     relay_set_state(i, cmd.state);
                 }
-                ESP_LOGI(TAG, "[RTOS Task] Semua Relay (1-5) diubah -> %s", cmd.state ? "ON" : "OFF");
+                ESP_LOGI(TAG, "[RTOS Task - Active LOW] Semua Relay (1-5) diubah -> %s", cmd.state ? "ON [LOW=0]" : "OFF [HIGH=1]");
             }
         }
     }
@@ -52,7 +54,7 @@ static void relay_task(void *pvParameters) {
 
 // Inisialisasi Hardware Relay & RTOS Queue
 void relay_ctrl_init(void) {
-    ESP_LOGI(TAG, "Inisialisasi 5-Channel Relay (D25, D16, D17, D13, D14)...");
+    ESP_LOGI(TAG, "Inisialisasi 5-Channel Relay (D25, D16, D17, D13, D14) - Mode: ACTIVE-LOW...");
 
     uint64_t pin_mask = 0;
     for (int i = 0; i < NUM_RELAYS; i++) {
@@ -68,7 +70,7 @@ void relay_ctrl_init(void) {
     };
     gpio_config(&io_conf);
 
-    // Set kondisi awal semua relay OFF
+    // Set kondisi awal semua relay OFF (Set HIGH untuk Active-LOW)
     for (int i = 0; i < NUM_RELAYS; i++) {
         gpio_set_level(relay_pins[i], RELAY_OFF_LEVEL);
         relay_states[i] = false;
@@ -81,15 +83,16 @@ void relay_ctrl_init(void) {
     xTaskCreate(relay_task, "relay_task", 2048, NULL, 6, NULL);
 }
 
-// Mengubah fisik pin relay secara langsung
+// Mengubah fisik pin relay secara langsung dengan logic Active-LOW
 void relay_set_state(uint8_t relay_num, bool state) {
     if (relay_num < 1 || relay_num > NUM_RELAYS) return;
     int idx = relay_num - 1;
     relay_states[idx] = state;
+    // Active LOW: state=true -> 0 (ON), state=false -> 1 (OFF)
     gpio_set_level(relay_pins[idx], state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
 }
 
-// Mendapatkan status relay (true/false)
+// Mendapatkan status relay (true = ON, false = OFF)
 bool relay_get_state(uint8_t relay_num) {
     if (relay_num < 1 || relay_num > NUM_RELAYS) return false;
     return relay_states[relay_num - 1];

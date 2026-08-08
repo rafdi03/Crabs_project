@@ -37,8 +37,8 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // KONFIGURASI WIFI & MQTT
 // ==========================================
-#define WIFI_SSID         "Bayu"
-#define WIFI_PASS         "12345678"
+#define WIFI_SSID         "Rumah Kita"
+#define WIFI_PASS         "EKAGUNAPUTRA03"
 #define MQTT_BROKER       "mqtt://broker.emqx.io:1883"
 #define DEVICE_ID         "ESP32-001"
 
@@ -49,8 +49,8 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // DEFINISI PIN SENSOR
 // ==========================================
-#define DS18B20_PIN       GPIO_NUM_33   // Suhu Air
-#define DHT_PIN           GPIO_NUM_32   // Suhu & Kelembaban Lingkungan
+#define DS18B20_PIN       GPIO_NUM_4   // Suhu Air
+#define DHT_PIN           GPIO_NUM_21   // Suhu & Kelembaban Lingkungan
 #define DHT_TYPE          DHT_TYPE_DHT22 // Ubah ke DHT_TYPE_DHT11 jika pakai DHT11
 
 #define TDS_ADC_CHANNEL   ADC_CHANNEL_6 // GPIO 34 (Sensor_VN / Analog In)
