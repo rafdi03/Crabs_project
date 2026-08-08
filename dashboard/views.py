@@ -6,11 +6,18 @@ from django.db.models import Avg
 from django.utils import timezone
 from datetime import timedelta, datetime
 from django.http import HttpResponse, JsonResponse
-from .models import Lokasi, Alat, DataSensor
+from .models import Lokasi, Alat, DataSensor, RelayState
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncDate, TruncMonth, TruncHour
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+import paho.mqtt.publish as publish
 import csv
 import json
+import os
 from collections import defaultdict
+
+MQTT_BROKER = os.environ.get('MQTT_BROKER', 'broker.emqx.io')
+MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
 
 # 1. Login
 def login_view(request):
@@ -47,7 +54,7 @@ def halaman_utama(request):
     semua_lokasi = Lokasi.objects.all()
     return render(request, 'dashboard/home.html', {'daftar_lokasi': semua_lokasi})
 
-# 5. Detail Lokasi
+# 5. Detail Lokasi (Dengan Inisialisasi RelayState per Alat)
 @login_required(login_url='login')
 def detail_lokasi(request, lokasi_id):
     lokasi_terpilih = get_object_or_404(Lokasi, id=lokasi_id)
@@ -71,11 +78,15 @@ def detail_lokasi(request, lokasi_id):
             'suhu_lingkungan': suhu_lingkungan_data
         })
 
+        # Pastikan status relay tersedia
+        relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+
         alat_data_list.append({
             'alat': alat,
             'sensor_terbaru': alat.data_sensor.first(),
             'chart_data': chart_data,
-            'tabel_riwayat': semua_history
+            'tabel_riwayat': semua_history,
+            'relay_state': relay_state,
         })
 
     context = {
@@ -84,7 +95,116 @@ def detail_lokasi(request, lokasi_id):
     }
     return render(request, 'dashboard/detail_lokasi.html', context)
 
-# 6. Download CSV
+# 6. API Kontrol Relay (Web -> MQTT & WebSockets)
+@login_required(login_url='login')
+def relay_control(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Metode request harus POST'}, status=405)
+    
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+        id_alat = data.get('id_alat')
+        relay_num = int(data.get('relay_num', 1)) # 1..5 atau 0 untuk all
+        state = bool(data.get('state', False))    # True = ON, False = OFF
+
+        alat = get_object_or_404(Alat, id_alat=id_alat)
+        relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+
+        # Update status relay di database
+        if relay_num == 0:
+            # Kontrol Semua Relay
+            relay_state.relay1 = state
+            relay_state.relay2 = state
+            relay_state.relay3 = state
+            relay_state.relay4 = state
+            relay_state.relay5 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/all/set"
+            mqtt_payload = "1" if state else "0"
+        elif relay_num == 1:
+            relay_state.relay1 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/1/set"
+            mqtt_payload = "1" if state else "0"
+        elif relay_num == 2:
+            relay_state.relay2 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/2/set"
+            mqtt_payload = "1" if state else "0"
+        elif relay_num == 3:
+            relay_state.relay3 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/3/set"
+            mqtt_payload = "1" if state else "0"
+        elif relay_num == 4:
+            relay_state.relay4 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/4/set"
+            mqtt_payload = "1" if state else "0"
+        elif relay_num == 5:
+            relay_state.relay5 = state
+            mqtt_topic = f"tambak/{id_alat}/relay/5/set"
+            mqtt_payload = "1" if state else "0"
+        else:
+            return JsonResponse({'error': 'Nomor relay tidak valid (1-5)'}, status=400)
+
+        relay_state.save()
+
+        # Publish perintah ke MQTT Broker EMQX
+        try:
+            publish.single(mqtt_topic, mqtt_payload, hostname=MQTT_BROKER, port=MQTT_PORT, keepalive=10)
+        except Exception as e:
+            print(f"⚠️ Gagal publish MQTT: {e}")
+
+        # Broadcast update status relay ke seluruh klien WebSocket
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'sensor_data',
+            {
+                'type': 'send_relay_data',
+                'data': {
+                    'type': 'relay_update',
+                    'id_alat': id_alat,
+                    'relay1': relay_state.relay1,
+                    'relay2': relay_state.relay2,
+                    'relay3': relay_state.relay3,
+                    'relay4': relay_state.relay4,
+                    'relay5': relay_state.relay5,
+                }
+            }
+        )
+
+        return JsonResponse({
+            'success': True,
+            'id_alat': id_alat,
+            'relay_num': relay_num,
+            'state': state,
+            'relay_states': {
+                'relay1': relay_state.relay1,
+                'relay2': relay_state.relay2,
+                'relay3': relay_state.relay3,
+                'relay4': relay_state.relay4,
+                'relay5': relay_state.relay5,
+            }
+        })
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+# 7. API Get Relay Status
+@login_required(login_url='login')
+def get_relay_status(request, alat_id):
+    try:
+        alat = get_object_or_404(Alat, id_alat=alat_id)
+        relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+        return JsonResponse({
+            'success': True,
+            'id_alat': alat_id,
+            'relay1': relay_state.relay1,
+            'relay2': relay_state.relay2,
+            'relay3': relay_state.relay3,
+            'relay4': relay_state.relay4,
+            'relay5': relay_state.relay5,
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+# 8. Download CSV
 @login_required(login_url='login')
 def download_csv_lokasi(request, lokasi_id):
     lokasi = get_object_or_404(Lokasi, id=lokasi_id)
@@ -106,7 +226,7 @@ def download_csv_lokasi(request, lokasi_id):
             ])
     return response
 
-# 7. API chart-bulanan
+# 9. API chart-bulanan
 @login_required(login_url='login')
 def chart_bulanan(request, alat_id):
     try:
@@ -156,7 +276,7 @@ def chart_bulanan(request, alat_id):
         }
     return JsonResponse(result)
 
-# 8. API chart-data (FIXED: Support 10 Menit & Anti-Lag)
+# 10. API chart-data (Support 10 Menit & Anti-Lag)
 @login_required
 def chart_data(request, alat_id):
     try:
@@ -240,11 +360,9 @@ def chart_data(request, alat_id):
         timestamp__lt=end_date
     ).order_by('timestamp')
 
-    # FUNGSI BANTUAN: Mengelompokkan data ke dalam interval waktu tertentu
     def aggregate_data(qs, interval_menit):
         buckets = defaultdict(list)
         for d in qs:
-            # Pembulatan ke bawah ke interval menit terdekat (misal: 10 menit)
             minute_bucket = (d.timestamp.minute // interval_menit) * interval_menit
             t = d.timestamp.replace(minute=minute_bucket, second=0, microsecond=0)
             buckets[t].append(d)
@@ -266,20 +384,17 @@ def chart_data(request, alat_id):
             })
         return aggregated
 
-    # TERAPKAN AGREGASI 10 MENIT UNTUK MINGGUAN & BULANAN
     if period in ['weekly', 'monthly']:
-        aggregated = aggregate_data(data_qs, 10) # Interval 10 Menit
+        aggregated = aggregate_data(data_qs, 10)
         if period == 'weekly':
             labels = [d['timestamp'].strftime('%a %H:%M') for d in aggregated]
         else:
             labels = [d['timestamp'].strftime('%d %b %H:%M') for d in aggregated]
             
     elif period == 'yearly':
-        # Untuk tahunan, 10 menit terlalu besar (bisa > 50.000 data). Kita gunakan 1 Jam agar browser tidak crash.
         aggregated = aggregate_data(data_qs, 60) 
         labels = [d['timestamp'].strftime('%d %b %H:%M') for d in aggregated]
 
-    # Kembalikan response dengan struktur yang SAMA PERSIS (tidak ada variable baru)
     result = {
         'labels': labels,
         'suhu_air': [d['suhu_air'] for d in aggregated],

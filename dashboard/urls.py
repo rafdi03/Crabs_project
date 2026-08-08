@@ -10,5 +10,6 @@ urlpatterns = [
     path('download-csv-lokasi/<int:lokasi_id>/', views.download_csv_lokasi, name='download_csv_lokasi'),
     path('api/chart-bulanan/<str:alat_id>/', views.chart_bulanan, name='chart_bulanan'),
     path('api/chart-data/<str:alat_id>/', views.chart_data, name='chart_data'),
-    
+    path('api/relay-control/', views.relay_control, name='relay_control'),
+    path('api/relay-status/<str:alat_id>/', views.get_relay_status, name='get_relay_status'),
 ]

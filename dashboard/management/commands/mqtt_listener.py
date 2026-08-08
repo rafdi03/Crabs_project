@@ -9,86 +9,135 @@ from django.utils import timezone
 from django.db import close_old_connections, OperationalError, IntegrityError
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
-from dashboard.models import Alat, DataSensor
+from dashboard.models import Alat, DataSensor, RelayState
 import paho.mqtt.client as mqtt
 import certifi 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):
-    help = 'Production MQTT Listener v3.0 - Thread-Safe & Cross-Platform'
+    help = 'Production MQTT Listener v3.1 - Thread-Safe & Unrestricted Sensor Value Acceptance'
 
     # Configuration
     BROKER = os.environ.get('MQTT_BROKER', 'broker.emqx.io')
-    PORT = int(os.environ.get('MQTT_PORT', 1883)) # Gunakan 8883 jika pakai TLS/SSL
+    PORT = int(os.environ.get('MQTT_PORT', 1883))
     MQTT_USER = os.environ.get('MQTT_USERNAME', '')
     MQTT_PASS = os.environ.get('MQTT_PASSWORD', '')
-    TOPIC = 'tambak/+/sensor'
-    RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 5))
+    TOPIC_SENSOR = 'tambak/+/sensor'
+    TOPIC_RELAY = 'tambak/+/relay/#'
+    RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 3))
     
-    # Regex diperbaiki agar fleksibel untuk berbagai nama ID Alat
     VALID_DEVICE_PATTERN = r'^[a-zA-Z0-9_-]+$'
-    MAX_DATA_AGE_SECONDS = int(os.environ.get('MAX_DATA_AGE', 300))
+    MAX_DATA_AGE_SECONDS = int(os.environ.get('MAX_DATA_AGE', 86400)) # 24 Jam toleransi
 
     def validate_payload(self, payload, device_id):
         device_ts = None
         
-        # Validasi Umur Data (Timezone-Aware)
-        if 'timestamp' in payload:
+        # Validasi Timestamp (Jika ada)
+        if 'timestamp' in payload and payload['timestamp']:
             try:
-                timestamp_str = payload['timestamp']
-                
+                timestamp_str = str(payload['timestamp'])
                 if '+' in timestamp_str or timestamp_str.endswith('Z'):
-                    device_ts = datetime.fromisoformat(timestamp_str)
+                    device_ts = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                 else:
                     device_ts = datetime.fromisoformat(timestamp_str)
                     device_ts = device_ts.replace(tzinfo=timezone.utc)
-                
-                time_diff = abs((timezone.now() - device_ts).total_seconds())
-                if time_diff > self.MAX_DATA_AGE_SECONDS:
-                    raise ValueError(f"Data too old ({device_id}): {time_diff:.0f}s")
-                    
-            except ValueError as e:
-                if "Invalid isoformat string" not in str(e):
-                    self.stdout.write(self.style.WARNING(f"Invalid timestamp: {e}"))
-                raise
+            except Exception as e:
+                device_ts = timezone.now()
+        else:
+            device_ts = timezone.now()
         
-        # Validasi Rentang Sensor
-        ranges = {
-            'do': (0.0, 20.0, "DO (mg/L)"),
-            'tds': (0.0, 5000.0, "TDS (ppm)"),
-            'suhu_air': (15.0, 40.0, "Water temp (°C)"),
-            'suhu_lingkungan': (20.0, 45.0, "Air temp (°C)"),
-            'jsn': (10.0, 600.0, "JSN distance (cm)"),
-        }
-        
-        for field, (min_val, max_val, label) in ranges.items():
-            value = payload.get(field, 0.0)
-            if value == 0.0:
-                continue # Izinkan nilai 0 sebagai indikator sensor error/belum terpasang
-            if not (min_val <= value <= max_val):
-                raise ValueError(f"{label} unrealistic: {value:.2f} (range: {min_val}-{max_val})")
-        
-        return device_ts 
+        # CATATAN: Validasi rentang nilai (ranges) telah DIHAPUS sesuai instruksi.
+        # Seluruh nilai (termasuk JSN 0.09 cm, 0.0, dsb.) akan langsung diterima dan disimpan.
+        return device_ts
 
     def handle(self, *args, **kwargs):
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 self.stdout.write(self.style.SUCCESS(f"🔒 Connected to {self.BROKER}:{self.PORT}"))
-                client.subscribe(self.TOPIC)
+                client.subscribe([(self.TOPIC_SENSOR, 0), (self.TOPIC_RELAY, 0)])
+                self.stdout.write(self.style.SUCCESS(f"📡 Subscribed to {self.TOPIC_SENSOR} & {self.TOPIC_RELAY}"))
             else:
                 self.stdout.write(self.style.ERROR(f"❌ Connection failed (rc={rc})"))
 
+        def handle_relay_message(device_id, topic, payload_str):
+            try:
+                close_old_connections()
+                try:
+                    alat = Alat.objects.get(id_alat=device_id, status_aktif=True)
+                except Alat.DoesNotExist:
+                    return
+
+                relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+                
+                # Cek jika payload dalam bentuk JSON status dari ESP32 (misal: {"relay1":1, "relay2":0, ...})
+                if payload_str.startswith('{') and payload_str.endswith('}'):
+                    data = json.loads(payload_str)
+                    if 'relay1' in data: relay_state.relay1 = bool(data['relay1'])
+                    if 'relay2' in data: relay_state.relay2 = bool(data['relay2'])
+                    if 'relay3' in data: relay_state.relay3 = bool(data['relay3'])
+                    if 'relay4' in data: relay_state.relay4 = bool(data['relay4'])
+                    if 'relay5' in data: relay_state.relay5 = bool(data['relay5'])
+                    relay_state.save()
+                elif 'set' in topic:
+                    # Parse dari topic misal "tambak/ESP32-001/relay/1/set"
+                    parts = topic.split('/')
+                    if len(parts) >= 4 and parts[2].isdigit():
+                        r_num = int(parts[2])
+                        st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
+                        if r_num == 1: relay_state.relay1 = st
+                        elif r_num == 2: relay_state.relay2 = st
+                        elif r_num == 3: relay_state.relay3 = st
+                        elif r_num == 4: relay_state.relay4 = st
+                        elif r_num == 5: relay_state.relay5 = st
+                        relay_state.save()
+                    elif 'all' in topic:
+                        st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
+                        relay_state.relay1 = st
+                        relay_state.relay2 = st
+                        relay_state.relay3 = st
+                        relay_state.relay4 = st
+                        relay_state.relay5 = st
+                        relay_state.save()
+
+                # Broadcast relay update ke WebSockets
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    'sensor_data',
+                    {
+                        'type': 'send_relay_data',
+                        'data': {
+                            'type': 'relay_update',
+                            'id_alat': device_id,
+                            'relay1': relay_state.relay1,
+                            'relay2': relay_state.relay2,
+                            'relay3': relay_state.relay3,
+                            'relay4': relay_state.relay4,
+                            'relay5': relay_state.relay5,
+                        }
+                    }
+                )
+                self.stdout.write(self.style.SUCCESS(f"🔌 [{device_id}] Relay State Synced: R1={relay_state.relay1} R2={relay_state.relay2} R3={relay_state.relay3} R4={relay_state.relay4} R5={relay_state.relay5}"))
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"❌ Relay parse error: {e}"))
+
         def on_message(client, userdata, msg):
             try:
-                topic_parts = msg.topic.split('/')
+                topic = msg.topic
+                topic_parts = topic.split('/')
                 device_id = topic_parts[1]
                 
                 if not re.match(self.VALID_DEVICE_PATTERN, device_id):
-                    self.stdout.write(self.style.WARNING(f"⚠️ Rejected ID: {device_id}"))
                     return
 
-                # Rate limiting
+                payload_str = msg.payload.decode('utf-8')
+
+                # Jika pesan adalah topik Relay
+                if '/relay' in topic:
+                    handle_relay_message(device_id, topic, payload_str)
+                    return
+
+                # Rate limiting untuk sensor
                 cache_key = f"mqtt_rate_{device_id}"
                 last_data = cache.get(cache_key)
                 if last_data:
@@ -96,16 +145,23 @@ class Command(BaseCommand):
                     if elapsed < self.RATE_LIMIT_SECONDS:
                         return 
 
-                # Parse & Validate
-                payload = json.loads(msg.payload.decode('utf-8'))
+                # Parse JSON Sensor
+                payload = json.loads(payload_str)
                 device_ts = self.validate_payload(payload, device_id)
                 
-                # Cek Database
+                # Cek Database Alat
                 try:
                     alat = Alat.objects.get(id_alat=device_id, status_aktif=True)
                 except Alat.DoesNotExist:
                     self.stdout.write(self.style.WARNING(f"❓ Unknown device: {device_id}"))
                     return
+
+                # Ekstraksi seluruh nilai sensor (menerima float/int berapapun)
+                do_val = float(payload.get('do', 0.0))
+                tds_val = float(payload.get('tds', 0.0))
+                jsn_val = float(payload.get('jsn', 0.0))
+                suhu_air_val = float(payload.get('suhu_air', 0.0))
+                suhu_lingkungan_val = float(payload.get('suhu_lingkungan', 0.0))
 
                 # Retry Logic & Save
                 max_retries = 3
@@ -117,27 +173,25 @@ class Command(BaseCommand):
                         
                         DataSensor.objects.create(
                             alat=alat,
-                            do_level=payload.get('do', 0.0),
-                            tds_level=payload.get('tds', 0.0),
-                            jsn_distance=payload.get('jsn', 0.0),
-                            suhu_air=payload.get('suhu_air', 0.0),
-                            suhu_lingkungan=payload.get('suhu_lingkungan', 0.0),
+                            do_level=do_val,
+                            tds_level=tds_val,
+                            jsn_distance=jsn_val,
+                            suhu_air=suhu_air_val,
+                            suhu_lingkungan=suhu_lingkungan_val,
                             device_timestamp=device_ts 
                         )
                         
                         cache.set(cache_key, timezone.now(), self.RATE_LIMIT_SECONDS)
-                        suhu_val = payload.get('suhu_air', 0.0)
-                        do_val = payload.get('do', 0.0)
 
-                        # 1. Evaluasi Suhu (Bobot 2)
-                        if 25 <= suhu_val <= 35:
+                        # 1. Evaluasi Suhu
+                        if 25 <= suhu_air_val <= 35:
                             skor_suhu = 5; css_suhu = "success"
-                        elif 20 <= suhu_val < 25:
+                        elif 20 <= suhu_air_val < 25:
                             skor_suhu = 3; css_suhu = "warning"
                         else:
                             skor_suhu = 1; css_suhu = "danger"
 
-                        # 2. Evaluasi DO (Bobot 2)
+                        # 2. Evaluasi DO
                         if do_val > 4:
                             skor_do = 5; css_do = "success"
                         elif 3 <= do_val <= 4:
@@ -145,7 +199,15 @@ class Command(BaseCommand):
                         else:
                             skor_do = 1; css_do = "danger"
 
-                        # 3. Kalkulasi Status Tambak Keseluruhan
+                        # 3. Evaluasi TDS
+                        if tds_val <= 500:
+                            css_tds = "success"
+                        elif tds_val <= 800:
+                            css_tds = "warning"
+                        else:
+                            css_tds = "danger"
+
+                        # 4. Status Tambak Keseluruhan
                         total_skor = (skor_suhu * 2) + (skor_do * 2)
                         
                         if total_skor >= 16:
@@ -168,17 +230,18 @@ class Command(BaseCommand):
                                     'id_alat': device_id,
                                     'do': do_val,
                                     'do_css': css_do,
-                                    'suhu_air': suhu_val,
+                                    'suhu_air': suhu_air_val,
                                     'suhu_css': css_suhu,
-                                    'tds': payload.get('tds', 0.0),
-                                    'jsn': payload.get('jsn', 0.0),
-                                    'suhu_lingkungan': payload.get('suhu_lingkungan', 0.0),
+                                    'tds': tds_val,
+                                    'tds_css': css_tds,
+                                    'jsn': jsn_val,
+                                    'suhu_lingkungan': suhu_lingkungan_val,
                                     'status_tambak': status_tambak,
                                     'badge_color': badge_color
                                 }
                             }
                         )
-                        self.stdout.write(self.style.SUCCESS(f"✅ [{device_id}] Saved"))
+                        self.stdout.write(self.style.SUCCESS(f"✅ [{device_id}] Saved: JSN={jsn_val}cm TDS={tds_val}ppm DO={do_val} SuhuAir={suhu_air_val}C"))
                         saved = True
                         break
                         
@@ -197,10 +260,8 @@ class Command(BaseCommand):
 
             except json.JSONDecodeError:
                 self.stdout.write(self.style.ERROR(f"❌ Invalid JSON"))
-            except ValueError as e:
-                self.stdout.write(self.style.WARNING(f"⚠️ Validation: {e}"))
             except Exception as e:
-                self.stdout.write(self.style.ERROR(f"💥 Critical: {type(e).__name__}: {e}"))
+                self.stdout.write(self.style.ERROR(f"💥 Error on_message: {type(e).__name__}: {e}"))
 
         client = mqtt.Client()
         client.on_connect = on_connect
@@ -221,7 +282,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.0 starting..."))
+        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.1 starting (Validation Removed & Relay Synced)..."))
         
         while True:
             try:

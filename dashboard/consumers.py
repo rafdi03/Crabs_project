@@ -13,3 +13,7 @@ class SensorConsumer(AsyncWebsocketConsumer):
     async def send_sensor_data(self, event):
         data = event['data']
         await self.send(text_data=json.dumps(data))
+
+    async def send_relay_data(self, event):
+        data = event['data']
+        await self.send(text_data=json.dumps(data))
