@@ -152,22 +152,26 @@ def relay_control(request):
             print(f"⚠️ Gagal publish MQTT: {e}")
 
         # Broadcast update status relay ke seluruh klien WebSocket
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            'sensor_data',
-            {
-                'type': 'send_relay_data',
-                'data': {
-                    'type': 'relay_update',
-                    'id_alat': id_alat,
-                    'relay1': relay_state.relay1,
-                    'relay2': relay_state.relay2,
-                    'relay3': relay_state.relay3,
-                    'relay4': relay_state.relay4,
-                    'relay5': relay_state.relay5,
-                }
-            }
-        )
+        try:
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'sensor_data',
+                    {
+                        'type': 'send_relay_data',
+                        'data': {
+                            'type': 'relay_update',
+                            'id_alat': id_alat,
+                            'relay1': relay_state.relay1,
+                            'relay2': relay_state.relay2,
+                            'relay3': relay_state.relay3,
+                            'relay4': relay_state.relay4,
+                            'relay5': relay_state.relay5,
+                        }
+                    }
+                )
+        except Exception as ws_err:
+            print(f"⚠️ Gagal broadcast WebSocket relay: {ws_err}")
 
         return JsonResponse({
             'success': True,
