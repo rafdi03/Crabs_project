@@ -558,9 +558,14 @@
                 <h2><i class="bi bi-geo-alt-fill"></i> {{ lokasi.nama_daerah }}</h2>
                 <p class="subtitle"><i class="bi bi-clock-history"></i> Pemantauan sensor real-time & kontrol hardware 5-Channel Relay</p>
             </div>
-            <a href="{% url 'download_csv_lokasi' lokasi.id %}" class="btn-download">
-                <i class="bi bi-download"></i> CSV Area
-            </a>
+            <div class="d-flex align-items-center gap-2">
+                <span id="wsConnectionStatus" class="badge rounded-pill bg-warning-subtle text-warning border border-warning-subtle px-3 py-2">
+                    <span class="spinner-border spinner-border-sm me-1"></span> Menghubungkan WebSocket...
+                </span>
+                <a href="{% url 'download_csv_lokasi' lokasi.id %}" class="btn-download">
+                    <i class="bi bi-download"></i> CSV Area
+                </a>
+            </div>
         </div>
 
         <!-- ===== LOOP ALAT ===== -->
@@ -805,7 +810,7 @@
 
                         <!-- 3. TABEL RIWAYAT DATA SENSOR (DI BAWAH KONTROL RELAY) -->
                         <div class="mt-3">
-                            <h6 class="fw-bold text-secondary" style="font-size:0.92rem;"><i class="bi bi-table me-2"></i>Riwayat Data Sensor Terakhir</h6>
+                            <h6 class="fw-bold text-secondary" style="font-size:0.92rem;"><i class="bi bi-table me-2"></i>Riwayat Data Sensor Terakhir (Real-Time)</h6>
                             <div class="table-wrapper">
                                 <table class="table table-hover align-middle">
                                     <thead>
@@ -818,7 +823,7 @@
                                             <th>Suhu Udara (°C)</th>
                                         </tr>
                                     </thead>
-                                    <tbody>
+                                    <tbody id="tabelTerakhir_{{ item.alat.id_alat }}">
                                         {% for baris in item.tabel_riwayat %}
                                         <tr>
                                             <td class="text-nowrap">{{ baris.timestamp|date:"d M Y, H:i:s" }}</td>
@@ -829,7 +834,7 @@
                                             <td>{{ baris.suhu_lingkungan }}</td>
                                         </tr>
                                         {% empty %}
-                                        <tr><td colspan="6" class="text-muted text-center py-3">Belum ada data riwayat</td></tr>
+                                        <tr id="empty_row_{{ item.alat.id_alat }}"><td colspan="6" class="text-muted text-center py-3">Belum ada data riwayat</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>
@@ -931,10 +936,13 @@
                     chartData = JSON.parse(rawData);
                 } catch(e) {}
 
+                window.realtimeCharts = window.realtimeCharts || {};
+
                 // ========== REAL-TIME CHARTS ==========
                 const ctxSuhu = document.getElementById('chartSuhu_' + alatId);
+                let chartSuhuInst = null;
                 if (ctxSuhu) {
-                    new Chart(ctxSuhu.getContext('2d'), {
+                    chartSuhuInst = new Chart(ctxSuhu.getContext('2d'), {
                         type: 'line',
                         data: {
                             labels: chartData.waktu || [],
@@ -957,8 +965,9 @@
                 }
 
                 const ctxKualitas = document.getElementById('chartKualitas_' + alatId);
+                let chartKualitasInst = null;
                 if (ctxKualitas) {
-                    new Chart(ctxKualitas.getContext('2d'), {
+                    chartKualitasInst = new Chart(ctxKualitas.getContext('2d'), {
                         type: 'line',
                         data: {
                             labels: chartData.waktu || [],
@@ -980,6 +989,12 @@
                         }
                     });
                 }
+
+                // Daftarkan ke objek global realtimeCharts
+                window.realtimeCharts[alatId] = {
+                    suhu: chartSuhuInst,
+                    kualitas: chartKualitasInst
+                };
 
                 // ========== RIWAYAT CHARTS & TABEL ==========
                 let riwayatChartSuhu = null;
@@ -1266,12 +1281,29 @@
         }
 
         // 4. WebSocket Live Real-Time Data (Sensor & Relay Sync)
+        function updateWSStatus(status) {
+            const badge = document.getElementById('wsConnectionStatus');
+            if (!badge) return;
+            if (status === 'connected') {
+                badge.className = 'badge rounded-pill bg-success-subtle text-success border border-success-subtle px-3 py-2';
+                badge.innerHTML = '<i class="bi bi-broadcast me-1 text-success"></i> Live Real-Time (Terhubung)';
+            } else if (status === 'connecting') {
+                badge.className = 'badge rounded-pill bg-warning-subtle text-warning border border-warning-subtle px-3 py-2';
+                badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Menghubungkan...';
+            } else {
+                badge.className = 'badge rounded-pill bg-danger-subtle text-danger border border-danger-subtle px-3 py-2';
+                badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Terputus (Mencoba ulang...)';
+            }
+        }
+
         function connectWebSocket() {
+            updateWSStatus('connecting');
             const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
             const socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
 
             socket.onopen = function() {
-                console.log('WebSocket Sensor & Relay terhubung.');
+                console.log('✅ WebSocket Sensor & Relay terhubung.');
+                updateWSStatus('connected');
             };
 
             socket.onmessage = function(e) {
@@ -1294,14 +1326,19 @@
 
                     // B. Jika pesan adalah update SENSOR
                     const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
+                    const doVal = (msg.do_mg !== undefined) ? msg.do_mg : msg.do;
+                    const tdsVal = (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds;
+                    const jsnVal = (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn;
+                    const lembapVal = (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara;
+
                     const map = {
-                        'do_': (msg.do_mg !== undefined) ? msg.do_mg : msg.do,
+                        'do_': doVal,
                         'suhu_air_': msg.suhu_air,
-                        'tds_': (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds,
-                        'jsn_': (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn,
+                        'tds_': tdsVal,
+                        'jsn_': jsnVal,
                         'suhu_lingkungan_': suhuUdrVal,
                         'suhu_udara_': suhuUdrVal,
-                        'lembap_': (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara
+                        'lembap_': lembapVal
                     };
                     for (const [prefix, val] of Object.entries(map)) {
                         if (val !== undefined) {
@@ -1316,10 +1353,13 @@
                     }
 
                     // Timestamp
+                    const now = new Date();
+                    const nowTimeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const nowFullStr = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + now.toLocaleTimeString('id-ID');
+
                     const timeEl = document.getElementById('time_' + id);
                     if (timeEl) {
-                        const now = new Date();
-                        timeEl.innerText = now.toLocaleString('id-ID');
+                        timeEl.innerText = nowFullStr;
                     }
 
                     // Status badge
@@ -1343,6 +1383,69 @@
                         boxTds.className = 'sensor-item ' + (msg.tds_css === 'success' ? 'status-good' : msg.tds_css === 'warning' ? 'status-warning' : 'status-danger');
                     }
 
+                    // =========================================================
+                    // 🚀 LIVE UPDATE GRAFIK REAL-TIME
+                    // =========================================================
+                    if (window.realtimeCharts && window.realtimeCharts[id]) {
+                        const charts = window.realtimeCharts[id];
+                        
+                        // Update Grafik Suhu
+                        if (charts.suhu && msg.suhu_air !== undefined) {
+                            charts.suhu.data.labels.push(nowTimeStr);
+                            charts.suhu.data.datasets[0].data.push(msg.suhu_air);
+                            charts.suhu.data.datasets[1].data.push(suhuUdrVal);
+                            if (charts.suhu.data.labels.length > 20) {
+                                charts.suhu.data.labels.shift();
+                                charts.suhu.data.datasets[0].data.shift();
+                                charts.suhu.data.datasets[1].data.shift();
+                            }
+                            charts.suhu.update('none');
+                        }
+
+                        // Update Grafik Kualitas (DO & TDS)
+                        if (charts.kualitas && doVal !== undefined) {
+                            charts.kualitas.data.labels.push(nowTimeStr);
+                            charts.kualitas.data.datasets[0].data.push(doVal);
+                            charts.kualitas.data.datasets[1].data.push(tdsVal);
+                            if (charts.kualitas.data.labels.length > 20) {
+                                charts.kualitas.data.labels.shift();
+                                charts.kualitas.data.datasets[0].data.shift();
+                                charts.kualitas.data.datasets[1].data.shift();
+                            }
+                            charts.kualitas.update('none');
+                        }
+                    }
+
+                    // =========================================================
+                    // 🚀 LIVE UPDATE TABEL RIWAYAT TERAKHIR
+                    // =========================================================
+                    const tbodyTerakhir = document.getElementById('tabelTerakhir_' + id);
+                    if (tbodyTerakhir) {
+                        const emptyRow = document.getElementById('empty_row_' + id);
+                        if (emptyRow) emptyRow.remove();
+
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td class="text-nowrap">${nowFullStr}</td>
+                            <td>${doVal !== undefined ? doVal : '--'}</td>
+                            <td>${msg.suhu_air !== undefined ? msg.suhu_air : '--'}</td>
+                            <td>${tdsVal !== undefined ? tdsVal : '--'}</td>
+                            <td>${jsnVal !== undefined ? jsnVal : '--'}</td>
+                            <td>${suhuUdrVal !== undefined ? suhuUdrVal : '--'}</td>
+                        `;
+                        tr.style.backgroundColor = 'rgba(13, 110, 253, 0.08)';
+                        tbodyTerakhir.insertBefore(tr, tbodyTerakhir.firstChild);
+
+                        setTimeout(() => {
+                            tr.style.transition = 'background-color 1.2s ease';
+                            tr.style.backgroundColor = '';
+                        }, 500);
+
+                        while (tbodyTerakhir.children.length > 30) {
+                            tbodyTerakhir.removeChild(tbodyTerakhir.lastChild);
+                        }
+                    }
+
                 } catch(err) {
                     console.warn('UI update error:', err);
                 }
@@ -1350,11 +1453,13 @@
 
             socket.onclose = function() {
                 console.warn('WebSocket terputus, mencoba reconnect dalam 3 detik...');
+                updateWSStatus('disconnected');
                 setTimeout(connectWebSocket, 3000);
             };
 
             socket.onerror = function(err) {
                 console.error('WebSocket error:', err);
+                updateWSStatus('disconnected');
             };
         }
 

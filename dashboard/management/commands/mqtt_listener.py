@@ -26,7 +26,7 @@ class Command(BaseCommand):
     MQTT_PASS = os.environ.get('MQTT_PASSWORD', '')
     TOPIC_SENSOR = 'tambak/+/sensor'
     TOPIC_RELAY = 'tambak/+/relay/#'
-    RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 3))
+    RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 1))
     
     VALID_DEVICE_PATTERN = r'^[a-zA-Z0-9_-]+$'
     MAX_DATA_AGE_SECONDS = int(os.environ.get('MAX_DATA_AGE', 86400)) # 24 Jam toleransi
