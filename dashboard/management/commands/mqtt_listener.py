@@ -236,29 +236,33 @@ class Command(BaseCommand):
                             badge_color = "bg-danger"
 
                         # Broadcast data ke WebSockets (Website Real-Time)
-                        channel_layer = get_channel_layer()
-                        async_to_sync(channel_layer.group_send)(
-                            'sensor_data',
-                            {
-                                'type': 'send_sensor_data',
-                                'data': {
-                                    'id_alat': device_id,
-                                    'do': do_val,
-                                    'do_css': css_do,
-                                    'suhu_air': suhu_air_val,
-                                    'suhu_css': css_suhu,
-                                    'tds': tds_val,
-                                    'tds_css': css_tds,
-                                    'jsn': jsn_val,
-                                    'suhu_lingkungan': suhu_lingkungan_val,
-                                    'suhu_udara': suhu_lingkungan_val,
-                                    'kelembaban_udara': lembap_udr_val,
-                                    'lembap_udr': lembap_udr_val,
-                                    'status_tambak': status_tambak,
-                                    'badge_color': badge_color
-                                }
-                            }
-                        )
+                        try:
+                            channel_layer = get_channel_layer()
+                            if channel_layer:
+                                async_to_sync(channel_layer.group_send)(
+                                    'sensor_data',
+                                    {
+                                        'type': 'send_sensor_data',
+                                        'data': {
+                                            'id_alat': device_id,
+                                            'do': do_val,
+                                            'do_css': css_do,
+                                            'suhu_air': suhu_air_val,
+                                            'suhu_css': css_suhu,
+                                            'tds': tds_val,
+                                            'tds_css': css_tds,
+                                            'jsn': jsn_val,
+                                            'suhu_lingkungan': suhu_lingkungan_val,
+                                            'suhu_udara': suhu_lingkungan_val,
+                                            'kelembaban_udara': lembap_udr_val,
+                                            'lembap_udr': lembap_udr_val,
+                                            'status_tambak': status_tambak,
+                                            'badge_color': badge_color
+                                        }
+                                    }
+                                )
+                        except Exception as ws_err:
+                            self.stdout.write(self.style.WARNING(f"⚠️ WS Broadcast Warning: {ws_err}"))
                         self.stdout.write(self.style.SUCCESS(
                             f"✅ [{device_id}] Saved -> JSN={jsn_status_log} | SuhuAir={suhu_air_val}C | TDS={tds_val}ppm | SuhuUdara={suhu_lingkungan_val}C | Lembap={lembap_udr_val}% | DO={do_val}mg/L"
                         ))
