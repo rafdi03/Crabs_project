@@ -1280,9 +1280,10 @@
             }
         }
 
-        // 4. WebSocket Live Real-Time Data dengan Smart Auto-Polling Fallback
+        // =========================================================
+        // 🔄 SMART AUTO-POLLING & WEBSOCKET ENGINE (DUAL-ENGINE)
+        // =========================================================
         const activeDeviceIds = [{% for item in alat_data_list %}'{{ item.alat.id_alat }}',{% endfor %}];
-        let pollingTimer = null;
         let lastSensorTimestamps = {};
         let isWebSocketConnected = false;
 
@@ -1294,13 +1295,10 @@
                 badge.innerHTML = '<i class="bi bi-broadcast me-1 text-success"></i> Live Real-Time (WebSocket)';
             } else if (status === 'polling') {
                 badge.className = 'badge rounded-pill bg-success-subtle text-success border border-success-subtle px-3 py-2';
-                badge.innerHTML = '<i class="bi bi-arrow-repeat me-1 text-success"></i> Live Real-Time (Auto-Sync)';
+                badge.innerHTML = '<i class="bi bi-arrow-repeat me-1 text-success"></i> Live Real-Time (Auto-Sync Aktif)';
             } else if (status === 'connecting') {
                 badge.className = 'badge rounded-pill bg-warning-subtle text-warning border border-warning-subtle px-3 py-2';
                 badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Menghubungkan...';
-            } else {
-                badge.className = 'badge rounded-pill bg-danger-subtle text-danger border border-danger-subtle px-3 py-2';
-                badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Terputus';
             }
         }
 
@@ -1308,6 +1306,8 @@
         function applyLiveSensorUpdate(msg, source) {
             const id = msg.id_alat;
             if (!id) return;
+
+            console.log(`⚡ [${source.toUpperCase()}] Update diterima untuk alat ${id}:`, msg);
 
             const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
             const doVal = (msg.do_mg !== undefined) ? msg.do_mg : msg.do;
@@ -1423,13 +1423,13 @@
                     <td>${jsnVal !== undefined ? jsnVal : '--'}</td>
                     <td>${suhuUdrVal !== undefined ? suhuUdrVal : '--'}</td>
                 `;
-                tr.style.backgroundColor = 'rgba(13, 110, 253, 0.08)';
+                tr.style.backgroundColor = 'rgba(13, 110, 253, 0.12)';
                 tbodyTerakhir.insertBefore(tr, tbodyTerakhir.firstChild);
 
                 setTimeout(() => {
-                    tr.style.transition = 'background-color 1.2s ease';
+                    tr.style.transition = 'background-color 1.5s ease';
                     tr.style.backgroundColor = '';
-                }, 500);
+                }, 400);
 
                 while (tbodyTerakhir.children.length > 30) {
                     tbodyTerakhir.removeChild(tbodyTerakhir.lastChild);
@@ -1438,100 +1438,91 @@
         }
 
         // =========================================================
-        // 🔄 SMART AUTO-POLLING FALLBACK (ANTI GAGAL)
+        // 🔄 AUTO-POLLING ENGINE (JALAN OTOMATIS TIAP 2 DETIK)
         // =========================================================
-        function startAutoPolling() {
-            if (pollingTimer || isWebSocketConnected) return;
-            console.log('🔄 Memulai Smart Auto-Polling (Live Fallback)...');
-            updateWSStatus('polling');
-
-            function pollAllDevices() {
-                if (isWebSocketConnected) {
-                    stopAutoPolling();
-                    return;
-                }
-                activeDeviceIds.forEach(id => {
-                    fetch('/api/sensor-terbaru/' + id + '/')
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                if (!lastSensorTimestamps[id] || lastSensorTimestamps[id] !== data.timestamp_iso) {
-                                    lastSensorTimestamps[id] = data.timestamp_iso;
-                                    applyLiveSensorUpdate(data, 'polling');
-                                }
+        function pollDevicesNow() {
+            if (isWebSocketConnected) return; // Jika WebSocket aktif, polling tidak perlu berjalan
+            activeDeviceIds.forEach(id => {
+                fetch('/api/sensor-terbaru/' + id + '/')
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            if (!lastSensorTimestamps[id]) {
+                                // Inisialisasi awal
+                                lastSensorTimestamps[id] = data.timestamp_iso || data.timestamp;
+                            } else if (lastSensorTimestamps[id] !== (data.timestamp_iso || data.timestamp)) {
+                                // Data baru masuk!
+                                lastSensorTimestamps[id] = data.timestamp_iso || data.timestamp;
+                                applyLiveSensorUpdate(data, 'auto-sync');
                             }
-                        })
-                        .catch(err => console.debug('Polling check:', err));
-                });
-            }
-
-            pollAllDevices();
-            pollingTimer = setInterval(pollAllDevices, 2000);
-        }
-
-        function stopAutoPolling() {
-            if (pollingTimer) {
-                clearInterval(pollingTimer);
-                pollingTimer = null;
-            }
+                        }
+                    })
+                    .catch(err => {
+                        // Polling silent catch
+                    });
+            });
         }
 
         // =========================================================
         // 🔌 KONEKSI WEBSOCKET DENGAN AUTO-FAILOVER
         // =========================================================
-        function connectWebSocket() {
-            updateWSStatus('connecting');
-            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            let socket = null;
+        function initRealtimeSync() {
+            updateWSStatus('polling');
+            
+            // 1. Jalankan Auto-Polling secara teratur setiap 2 detik
+            setInterval(pollDevicesNow, 2000);
+            pollDevicesNow();
 
+            // 2. Coba juga koneksi WebSocket jika didukung server
             try {
-                socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
-            } catch(e) {
-                console.warn('Inisialisasi WebSocket gagal, mengaktifkan auto-polling:', e);
-                startAutoPolling();
-                return;
-            }
+                const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                const socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
 
-            socket.onopen = function() {
-                console.log('✅ WebSocket Sensor & Relay terhubung.');
-                isWebSocketConnected = true;
-                stopAutoPolling();
-                updateWSStatus('connected');
-            };
+                socket.onopen = function() {
+                    console.log('✅ WebSocket Sensor & Relay terhubung.');
+                    isWebSocketConnected = true;
+                    updateWSStatus('connected');
+                };
 
-            socket.onmessage = function(e) {
-                try {
-                    const msg = JSON.parse(e.data);
-                    if (msg.type === 'relay_update') {
-                        updateRelayUI(msg.id_alat, {
-                            relay1: msg.relay1,
-                            relay2: msg.relay2,
-                            relay3: msg.relay3,
-                            relay4: msg.relay4,
-                            relay5: msg.relay5
-                        });
-                        return;
+                socket.onmessage = function(e) {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.type === 'relay_update') {
+                            updateRelayUI(msg.id_alat, {
+                                relay1: msg.relay1,
+                                relay2: msg.relay2,
+                                relay3: msg.relay3,
+                                relay4: msg.relay4,
+                                relay5: msg.relay5
+                            });
+                            return;
+                        }
+                        applyLiveSensorUpdate(msg, 'websocket');
+                    } catch(err) {
+                        console.warn('Message parsing error:', err);
                     }
-                    applyLiveSensorUpdate(msg, 'websocket');
-                } catch(err) {
-                    console.warn('Message parsing error:', err);
-                }
-            };
+                };
 
-            socket.onclose = function() {
-                isWebSocketConnected = false;
-                startAutoPolling();
-                setTimeout(connectWebSocket, 5000);
-            };
+                socket.onclose = function() {
+                    isWebSocketConnected = false;
+                    updateWSStatus('polling');
+                };
 
-            socket.onerror = function() {
+                socket.onerror = function() {
+                    isWebSocketConnected = false;
+                    updateWSStatus('polling');
+                };
+            } catch(e) {
                 isWebSocketConnected = false;
-                startAutoPolling();
-            };
+                updateWSStatus('polling');
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            connectWebSocket();
+            initRealtimeSync();
         });
     </script>
 </body>
