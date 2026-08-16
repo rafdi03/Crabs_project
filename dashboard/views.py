@@ -65,10 +65,10 @@ def detail_lokasi(request, lokasi_id):
         history_grafik = alat.data_sensor.all()[:20][::-1]
         
         waktu = [timezone.localtime(d.timestamp).strftime('%H:%M') for d in history_grafik]
-        do_data = [d.do_level for d in history_grafik]
-        tds_data = [d.tds_level for d in history_grafik]
-        suhu_air_data = [d.suhu_air for d in history_grafik]
-        suhu_lingkungan_data = [d.suhu_lingkungan for d in history_grafik]
+        do_data = [round(float(d.do_level), 2) for d in history_grafik]
+        tds_data = [round(float(d.tds_level), 2) for d in history_grafik]
+        suhu_air_data = [round(float(d.suhu_air), 2) for d in history_grafik]
+        suhu_lingkungan_data = [round(float(d.suhu_lingkungan), 2) for d in history_grafik]
 
         chart_data = json.dumps({
             'waktu': waktu,
@@ -219,35 +219,24 @@ def get_sensor_terbaru(request, alat_id):
         if not sensor:
             return JsonResponse({'success': False, 'message': 'Belum ada data sensor'})
 
-        suhu_air_val = sensor.suhu_air
-        do_val = sensor.do_level
-        tds_val = sensor.tds_level
-        suhu_lingk_val = sensor.suhu_lingkungan
-        lembap_val = sensor.kelembaban_udara
-        jsn_val = sensor.jsn_distance
+        # Nilai Sensor Real (Dibulatkan seragam 2 angka di belakang koma :.2f)
+        suhu_air_val = round(float(sensor.suhu_air), 2)
+        suhu_lingk_val = round(float(sensor.suhu_lingkungan), 2)
+        do_val = round(float(sensor.do_level), 2)
+        tds_val = round(float(sensor.tds_level), 2)
+        jsn_val = round(float(sensor.jsn_distance), 2)
+        lembap_val = round(float(sensor.kelembaban_udara), 2)
 
-        if 25 <= suhu_air_val <= 35:
-            skor_suhu = 5; css_suhu = "success"
-        elif 20 <= suhu_air_val < 25:
-            skor_suhu = 3; css_suhu = "warning"
-        else:
-            skor_suhu = 1; css_suhu = "danger"
+        # Evaluasi Status Berdasarkan Threshold
+        css_suhu = "success" if 25 <= suhu_air_val <= 35 else ("warning" if 20 <= suhu_air_val < 25 else "danger")
+        css_do = "success" if do_val >= 4.0 else ("warning" if do_val >= 3.0 else "danger")
+        css_tds = "success" if tds_val <= 500 else ("warning" if tds_val <= 800 else "danger")
 
-        if do_val > 4:
-            skor_do = 5; css_do = "success"
-        elif 3 <= do_val <= 4:
-            skor_do = 3; css_do = "warning"
-        else:
-            skor_do = 1; css_do = "danger"
-
-        if tds_val <= 500:
-            css_tds = "success"
-        elif tds_val <= 800:
-            css_tds = "warning"
-        else:
-            css_tds = "danger"
-
+        # Skor Tambak
+        skor_suhu = 5 if css_suhu == "success" else (3 if css_suhu == "warning" else 1)
+        skor_do = 5 if css_do == "success" else (3 if css_do == "warning" else 1)
         total_skor = (skor_suhu * 2) + (skor_do * 2)
+
         if total_skor >= 16:
             status_tambak = "KONDISI PRIMA (AMAN)"
             badge_color = "bg-success"
@@ -293,7 +282,7 @@ def get_sensor_terbaru(request, alat_id):
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
-# 8. Download CSV
+# 8. Download CSV (Format .2f untuk semua data numerik sensor)
 @login_required(login_url='login')
 def download_csv_lokasi(request, lokasi_id):
     lokasi = get_object_or_404(Lokasi, id=lokasi_id)
@@ -307,12 +296,12 @@ def download_csv_lokasi(request, lokasi_id):
             writer.writerow([
                 alat.nama_kolam,
                 timezone.localtime(data.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
-                data.do_level,
-                data.tds_level,
-                data.jsn_distance,
-                data.suhu_air,
-                data.suhu_lingkungan,
-                data.kelembaban_udara
+                f"{data.do_level:.2f}",
+                f"{data.tds_level:.2f}",
+                f"{data.jsn_distance:.2f}",
+                f"{data.suhu_air:.2f}",
+                f"{data.suhu_lingkungan:.2f}",
+                f"{data.kelembaban_udara:.2f}"
             ])
     return response
 
@@ -344,11 +333,11 @@ def chart_bulanan(request, alat_id):
         )
         result = {
             'labels': [d['hari'].strftime('%d %b') for d in data_harian],
-            'suhu_air': [round(d['avg_suhu_air'], 2) for d in data_harian],
-            'suhu_lingkungan': [round(d['avg_suhu_lingkungan'], 2) for d in data_harian],
-            'do': [round(d['avg_do'], 2) for d in data_harian],
-            'tds': [round(d['avg_tds'], 2) for d in data_harian],
-            'jsn': [round(d['avg_jsn'], 2) for d in data_harian],
+            'suhu_air': [round(float(d['avg_suhu_air']), 2) for d in data_harian],
+            'suhu_lingkungan': [round(float(d['avg_suhu_lingkungan']), 2) for d in data_harian],
+            'do': [round(float(d['avg_do']), 2) for d in data_harian],
+            'tds': [round(float(d['avg_tds']), 2) for d in data_harian],
+            'jsn': [round(float(d['avg_jsn']), 2) for d in data_harian],
         }
     else:
         data = DataSensor.objects.filter(
@@ -358,11 +347,11 @@ def chart_bulanan(request, alat_id):
         ).order_by('timestamp')
         result = {
             'labels': [timezone.localtime(d.timestamp).strftime('%d %H:%M') for d in data],
-            'suhu_air': [d.suhu_air for d in data],
-            'suhu_lingkungan': [d.suhu_lingkungan for d in data],
-            'do': [d.do_level for d in data],
-            'tds': [d.tds_level for d in data],
-            'jsn': [d.jsn_distance for d in data],
+            'suhu_air': [round(float(d.suhu_air), 2) for d in data],
+            'suhu_lingkungan': [round(float(d.suhu_lingkungan), 2) for d in data],
+            'do': [round(float(d.do_level), 2) for d in data],
+            'tds': [round(float(d.tds_level), 2) for d in data],
+            'jsn': [round(float(d.jsn_distance), 2) for d in data],
         }
     return JsonResponse(result)
 
@@ -394,11 +383,11 @@ def chart_data(request, alat_id):
         labels = [timezone.localtime(d.timestamp).strftime('%H:%M') for d in data]
         result = {
             'labels': labels,
-            'suhu_air': [d.suhu_air for d in data],
-            'suhu_lingkungan': [d.suhu_lingkungan for d in data],
-            'do': [d.do_level for d in data],
-            'tds': [d.tds_level for d in data],
-            'jsn': [d.jsn_distance for d in data],
+            'suhu_air': [round(float(d.suhu_air), 2) for d in data],
+            'suhu_lingkungan': [round(float(d.suhu_lingkungan), 2) for d in data],
+            'do': [round(float(d.do_level), 2) for d in data],
+            'tds': [round(float(d.tds_level), 2) for d in data],
+            'jsn': [round(float(d.jsn_distance), 2) for d in data],
         }
         return JsonResponse(result)
 

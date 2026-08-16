@@ -413,7 +413,7 @@ void updateDisplaySuhuAir(float suhu) {
   } else {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(3);
-    tft.print(suhu, 1);
+    tft.print(suhu, 2);
     tft.setTextSize(2);
     tft.print(" C");
   }
@@ -445,7 +445,7 @@ void updateDisplayJSN(float jarak) {
   } else {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(3);
-    tft.print(jarak, 1);
+    tft.print(jarak, 2);
     tft.setTextSize(2);
     tft.print(" cm");
   }
@@ -480,14 +480,14 @@ void updateDisplayDHT(float tUdara, float hUdara) {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Suhu Udara : ");
-    tft.print(tUdara, 1);
+    tft.print(tUdara, 2);
     tft.print(" C");
 
     tft.setCursor(12, 208);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Kelembapan : ");
-    tft.print(hUdara, 1);
+    tft.print(hUdara, 2);
     tft.print(" %");
   }
 }

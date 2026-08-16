@@ -165,17 +165,17 @@ class Command(BaseCommand):
                 # =========================================================================
                 # EKSTRAKSI DATA SENSOR DARI PAYLOAD
                 # =========================================================================
-                suhu_air_val = float(payload.get('suhu_air', 0.0))
-                tds_val = float(payload.get('tds_ppm', payload.get('tds', 0.0)))
-                suhu_lingkungan_val = float(payload.get('suhu_udara', payload.get('suhu_lingkungan', 0.0)))
-                lembap_udr_val = float(payload.get('lembap_udr', payload.get('kelembaban', payload.get('humidity', 0.0))))
-                do_val = float(payload.get('do_mg', payload.get('do', 0.0)))
+                suhu_air_val = round(float(payload.get('suhu_air', 0.0)), 2)
+                tds_val = round(float(payload.get('tds_ppm', payload.get('tds', 0.0))), 2)
+                suhu_lingkungan_val = round(float(payload.get('suhu_udara', payload.get('suhu_lingkungan', 0.0))), 2)
+                lembap_udr_val = round(float(payload.get('lembap_udr', payload.get('kelembaban', payload.get('humidity', 0.0)))), 2)
+                do_val = round(float(payload.get('do_mg', payload.get('do', 0.0))), 2)
 
                 # =========================================================================
                 # 🚀 DATA JSN ASLI DARI ESP32 (100% MURNI TANPA DUMMY / BYPASS)
                 # =========================================================================
-                jsn_val = float(payload.get('jarak_cm', payload.get('jsn', 0.0)))
-                jsn_status_log = f"{jsn_val}cm"
+                jsn_val = round(float(payload.get('jarak_cm', payload.get('jsn', 0.0))), 2)
+                jsn_status_log = f"{jsn_val:.2f}cm"
 
                 # Retry Logic & Save ke Database
                 max_retries = 3

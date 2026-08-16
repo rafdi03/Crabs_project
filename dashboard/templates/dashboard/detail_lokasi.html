@@ -599,7 +599,7 @@
                         {% else %}status-danger{% endif %}">
                         <div class="label"><i class="bi bi-droplet"></i> DO</div>
                         <div class="value" id="do_{{ item.alat.id_alat }}">
-                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.do_level }}{% else %}--{% endif %}
+                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.do_level|floatformat:2 }}{% else %}--{% endif %}
                         </div>
                         <div class="unit">mg/L</div>
                     </div>
@@ -610,7 +610,7 @@
                         {% else %}status-danger{% endif %}">
                         <div class="label"><i class="bi bi-thermometer-half"></i> Suhu Air</div>
                         <div class="value" id="suhu_air_{{ item.alat.id_alat }}">
-                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.suhu_air }}{% else %}--{% endif %}
+                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.suhu_air|floatformat:2 }}{% else %}--{% endif %}
                         </div>
                         <div class="unit">°C</div>
                     </div>
@@ -621,7 +621,7 @@
                         {% else %}status-danger{% endif %}">
                         <div class="label"><i class="bi bi-water"></i> TDS</div>
                         <div class="value" id="tds_{{ item.alat.id_alat }}">
-                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.tds_level }}{% else %}--{% endif %}
+                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.tds_level|floatformat:2 }}{% else %}--{% endif %}
                         </div>
                         <div class="unit">ppm</div>
                     </div>
@@ -629,7 +629,7 @@
                     <div id="box_jsn_{{ item.alat.id_alat }}" class="sensor-item status-info">
                         <div class="label"><i class="bi bi-rulers"></i> JSN Jarak</div>
                         <div class="value" id="jsn_{{ item.alat.id_alat }}">
-                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.jsn_distance }}{% else %}--{% endif %}
+                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.jsn_distance|floatformat:2 }}{% else %}--{% endif %}
                         </div>
                         <div class="unit">cm</div>
                     </div>
@@ -637,7 +637,7 @@
                     <div id="box_suhu_udara_{{ item.alat.id_alat }}" class="sensor-item status-info">
                         <div class="label"><i class="bi bi-thermometer-sun"></i> Suhu Udara</div>
                         <div class="value" id="suhu_lingkungan_{{ item.alat.id_alat }}">
-                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.suhu_lingkungan }}{% else %}--{% endif %}
+                            {% if item.sensor_terbaru %}{{ item.sensor_terbaru.suhu_lingkungan|floatformat:2 }}{% else %}--{% endif %}
                         </div>
                         <div class="unit">°C</div>
                     </div>
@@ -827,11 +827,11 @@
                                         {% for baris in item.tabel_riwayat %}
                                         <tr>
                                             <td class="text-nowrap">{{ baris.timestamp|date:"d M Y, H:i:s" }}</td>
-                                            <td>{{ baris.do_level }}</td>
-                                            <td>{{ baris.suhu_air }}</td>
-                                            <td>{{ baris.tds_level }}</td>
-                                            <td>{{ baris.jsn_distance }}</td>
-                                            <td>{{ baris.suhu_lingkungan }}</td>
+                                            <td>{{ baris.do_level|floatformat:2 }}</td>
+                                            <td>{{ baris.suhu_air|floatformat:2 }}</td>
+                                            <td>{{ baris.tds_level|floatformat:2 }}</td>
+                                            <td>{{ baris.jsn_distance|floatformat:2 }}</td>
+                                            <td>{{ baris.suhu_lingkungan|floatformat:2 }}</td>
                                         </tr>
                                         {% empty %}
                                         <tr id="empty_row_{{ item.alat.id_alat }}"><td colspan="6" class="text-muted text-center py-3">Belum ada data riwayat</td></tr>
@@ -1309,31 +1309,31 @@
 
             console.log(`⚡ [${source.toUpperCase()}] Update diterima untuk alat ${id}:`, msg);
 
+            const format2f = (v) => (v !== undefined && v !== null && !isNaN(v) && v !== '') ? Number(v).toFixed(2) : '--';
+
             const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
             const doVal = (msg.do_mg !== undefined) ? msg.do_mg : msg.do;
             const tdsVal = (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds;
             const jsnVal = (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn;
             const lembapVal = (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara;
 
-            // 1. Update Nilai di Kotak Sensor
+            // 1. Update Nilai di Kotak Sensor (Format Seragam .2f)
             const map = {
-                'do_': doVal,
-                'suhu_air_': msg.suhu_air,
-                'tds_': tdsVal,
-                'jsn_': jsnVal,
-                'suhu_lingkungan_': suhuUdrVal,
-                'suhu_udara_': suhuUdrVal,
-                'lembap_': lembapVal
+                'do_': format2f(doVal),
+                'suhu_air_': format2f(msg.suhu_air),
+                'tds_': format2f(tdsVal),
+                'jsn_': format2f(jsnVal),
+                'suhu_lingkungan_': format2f(suhuUdrVal),
+                'suhu_udara_': format2f(suhuUdrVal),
+                'lembap_': format2f(lembapVal)
             };
             for (const [prefix, val] of Object.entries(map)) {
-                if (val !== undefined) {
-                    const el = document.getElementById(prefix + id);
-                    if (el) {
-                        el.innerText = val;
-                        el.classList.remove('value-update');
-                        void el.offsetWidth;
-                        el.classList.add('value-update');
-                    }
+                const el = document.getElementById(prefix + id);
+                if (el && val !== '--') {
+                    el.innerText = val;
+                    el.classList.remove('value-update');
+                    void el.offsetWidth;
+                    el.classList.add('value-update');
                 }
             }
 
@@ -1382,8 +1382,8 @@
                 // Update Grafik Suhu
                 if (charts.suhu && msg.suhu_air !== undefined) {
                     charts.suhu.data.labels.push(nowTimeStr);
-                    charts.suhu.data.datasets[0].data.push(msg.suhu_air);
-                    charts.suhu.data.datasets[1].data.push(suhuUdrVal);
+                    charts.suhu.data.datasets[0].data.push(Number(msg.suhu_air).toFixed(2));
+                    charts.suhu.data.datasets[1].data.push(Number(suhuUdrVal).toFixed(2));
                     if (charts.suhu.data.labels.length > 20) {
                         charts.suhu.data.labels.shift();
                         charts.suhu.data.datasets[0].data.shift();
@@ -1395,8 +1395,8 @@
                 // Update Grafik Kualitas (DO & TDS)
                 if (charts.kualitas && doVal !== undefined) {
                     charts.kualitas.data.labels.push(nowTimeStr);
-                    charts.kualitas.data.datasets[0].data.push(doVal);
-                    charts.kualitas.data.datasets[1].data.push(tdsVal);
+                    charts.kualitas.data.datasets[0].data.push(Number(doVal).toFixed(2));
+                    charts.kualitas.data.datasets[1].data.push(Number(tdsVal).toFixed(2));
                     if (charts.kualitas.data.labels.length > 20) {
                         charts.kualitas.data.labels.shift();
                         charts.kualitas.data.datasets[0].data.shift();
@@ -1417,11 +1417,11 @@
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td class="text-nowrap">${nowFullStr}</td>
-                    <td>${doVal !== undefined ? doVal : '--'}</td>
-                    <td>${msg.suhu_air !== undefined ? msg.suhu_air : '--'}</td>
-                    <td>${tdsVal !== undefined ? tdsVal : '--'}</td>
-                    <td>${jsnVal !== undefined ? jsnVal : '--'}</td>
-                    <td>${suhuUdrVal !== undefined ? suhuUdrVal : '--'}</td>
+                    <td>${format2f(doVal)}</td>
+                    <td>${format2f(msg.suhu_air)}</td>
+                    <td>${format2f(tdsVal)}</td>
+                    <td>${format2f(jsnVal)}</td>
+                    <td>${format2f(suhuUdrVal)}</td>
                 `;
                 tr.style.backgroundColor = 'rgba(13, 110, 253, 0.12)';
                 tbodyTerakhir.insertBefore(tr, tbodyTerakhir.firstChild);
