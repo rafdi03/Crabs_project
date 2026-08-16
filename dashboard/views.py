@@ -148,10 +148,10 @@ def relay_control(request):
         # Publish perintah ke MQTT Broker EMQX
         try:
             publish.single(mqtt_topic, mqtt_payload, hostname=MQTT_BROKER, port=MQTT_PORT, keepalive=10)
-        except Exception as e:
-            print(f"⚠️ Gagal publish MQTT: {e}")
+        except Exception:
+            pass
 
-        # Broadcast update status relay ke seluruh klien WebSocket
+        # Broadcast update status relay ke seluruh klien WebSocket (opsional / fallback ke polling)
         try:
             channel_layer = get_channel_layer()
             if channel_layer:
@@ -170,8 +170,8 @@ def relay_control(request):
                         }
                     }
                 )
-        except Exception as ws_err:
-            print(f"⚠️ Gagal broadcast WebSocket relay: {ws_err}")
+        except Exception:
+            pass
 
         return JsonResponse({
             'success': True,
