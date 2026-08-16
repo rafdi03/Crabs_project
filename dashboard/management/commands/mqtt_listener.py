@@ -25,7 +25,6 @@ class Command(BaseCommand):
     MQTT_USER = os.environ.get('MQTT_USERNAME', '')
     MQTT_PASS = os.environ.get('MQTT_PASSWORD', '')
     TOPIC_SENSOR = 'tambak/+/sensor'
-    TOPIC_RELAY = 'tambak/+/relay/status'
     RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 1))
     
     VALID_DEVICE_PATTERN = r'^[a-zA-Z0-9_-]+$'
@@ -54,8 +53,8 @@ class Command(BaseCommand):
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 self.stdout.write(self.style.SUCCESS(f"🔒 Connected to {self.BROKER}:{self.PORT}"))
-                client.subscribe([(self.TOPIC_SENSOR, 0), (self.TOPIC_RELAY, 0)])
-                self.stdout.write(self.style.SUCCESS(f"📡 Subscribed to {self.TOPIC_SENSOR} & {self.TOPIC_RELAY}"))
+                client.subscribe(self.TOPIC_SENSOR, 0)
+                self.stdout.write(self.style.SUCCESS(f"📡 Subscribed to {self.TOPIC_SENSOR}"))
             else:
                 self.stdout.write(self.style.ERROR(f"❌ Connection failed (rc={rc})"))
 
@@ -83,23 +82,27 @@ class Command(BaseCommand):
                         pass
 
                 # Broadcast status relay ke WebSockets
-                channel_layer = get_channel_layer()
-                if channel_layer:
-                    async_to_sync(channel_layer.group_send)(
-                        'sensor_data',
-                        {
-                            'type': 'send_relay_data',
-                            'data': {
-                                'type': 'relay_update',
-                                'id_alat': device_id,
-                                'relay1': relay_state.relay1,
-                                'relay2': relay_state.relay2,
-                                'relay3': relay_state.relay3,
-                                'relay4': relay_state.relay4,
-                                'relay5': relay_state.relay5,
+                try:
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        async_to_sync(channel_layer.group_send)(
+                            'sensor_data',
+                            {
+                                'type': 'send_relay_data',
+                                'data': {
+                                    'type': 'relay_update',
+                                    'id_alat': device_id,
+                                    'relay1': relay_state.relay1,
+                                    'relay2': relay_state.relay2,
+                                    'relay3': relay_state.relay3,
+                                    'relay4': relay_state.relay4,
+                                    'relay5': relay_state.relay5,
+                                }
                             }
-                        }
-                    )
+                        )
+                except Exception as ws_err:
+                    pass
+
                 self.stdout.write(self.style.SUCCESS(f"🔌 [{device_id}] Relay Confirmed: R1={relay_state.relay1} R2={relay_state.relay2} R3={relay_state.relay3} R4={relay_state.relay4} R5={relay_state.relay5}"))
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"❌ Relay parse error: {e}"))
@@ -115,9 +118,8 @@ class Command(BaseCommand):
 
                 payload_str = msg.payload.decode('utf-8')
 
-                # Jika pesan adalah topik Relay
+                # Jika pesan adalah topik Relay, abaikan agar tidak mengganggu listener
                 if '/relay' in topic:
-                    handle_relay_message(device_id, topic, payload_str)
                     return
 
                 # Rate limiting untuk sensor
