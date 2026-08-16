@@ -64,7 +64,7 @@ def detail_lokasi(request, lokasi_id):
         semua_history = alat.data_sensor.all()[:30]
         history_grafik = alat.data_sensor.all()[:20][::-1]
         
-        waktu = [d.timestamp.strftime('%H:%M') for d in history_grafik]
+        waktu = [timezone.localtime(d.timestamp).strftime('%H:%M') for d in history_grafik]
         do_data = [d.do_level for d in history_grafik]
         tds_data = [d.tds_level for d in history_grafik]
         suhu_air_data = [d.suhu_air for d in history_grafik]
@@ -258,6 +258,8 @@ def get_sensor_terbaru(request, alat_id):
             status_tambak = "KRITIS (BAHAYA)"
             badge_color = "bg-danger"
 
+        local_ts = timezone.localtime(sensor.timestamp)
+
         return JsonResponse({
             'success': True,
             'id_alat': alat_id,
@@ -272,9 +274,9 @@ def get_sensor_terbaru(request, alat_id):
             'jarak_cm': jsn_val,
             'lembap_udr': lembap_val,
             'kelembaban_udara': lembap_val,
-            'timestamp': sensor.timestamp.strftime('%d %b %Y, %H:%M:%S'),
-            'timestamp_iso': sensor.timestamp.isoformat(),
-            'time_only': sensor.timestamp.strftime('%H:%M:%S'),
+            'timestamp': local_ts.strftime('%d %b %Y, %H:%M:%S'),
+            'timestamp_iso': local_ts.isoformat(),
+            'time_only': local_ts.strftime('%H:%M:%S'),
             'status_tambak': status_tambak,
             'badge_color': badge_color,
             'suhu_css': css_suhu,
@@ -304,7 +306,7 @@ def download_csv_lokasi(request, lokasi_id):
         for data in alat.data_sensor.all():
             writer.writerow([
                 alat.nama_kolam,
-                data.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                timezone.localtime(data.timestamp).strftime('%Y-%m-%d %H:%M:%S'),
                 data.do_level,
                 data.tds_level,
                 data.jsn_distance,
@@ -355,7 +357,7 @@ def chart_bulanan(request, alat_id):
             timestamp__lte=end_date
         ).order_by('timestamp')
         result = {
-            'labels': [d.timestamp.strftime('%d %H:%M') for d in data],
+            'labels': [timezone.localtime(d.timestamp).strftime('%d %H:%M') for d in data],
             'suhu_air': [d.suhu_air for d in data],
             'suhu_lingkungan': [d.suhu_lingkungan for d in data],
             'do': [d.do_level for d in data],
@@ -389,7 +391,7 @@ def chart_data(request, alat_id):
             timestamp__lt=end_date
         ).order_by('timestamp')
         
-        labels = [d.timestamp.strftime('%H:%M') for d in data]
+        labels = [timezone.localtime(d.timestamp).strftime('%H:%M') for d in data]
         result = {
             'labels': labels,
             'suhu_air': [d.suhu_air for d in data],
@@ -451,8 +453,9 @@ def chart_data(request, alat_id):
     def aggregate_data(qs, interval_menit):
         buckets = defaultdict(list)
         for d in qs:
-            minute_bucket = (d.timestamp.minute // interval_menit) * interval_menit
-            t = d.timestamp.replace(minute=minute_bucket, second=0, microsecond=0)
+            local_t = timezone.localtime(d.timestamp)
+            minute_bucket = (local_t.minute // interval_menit) * interval_menit
+            t = local_t.replace(minute=minute_bucket, second=0, microsecond=0)
             buckets[t].append(d)
             
         aggregated = []
