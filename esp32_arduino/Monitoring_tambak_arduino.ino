@@ -241,6 +241,115 @@ void setupGSMTTGO() {
     return;
   }
   Serial.println(" GPRS Telkomsel Berhasil Terhubung!");
+// ================= FUNGSI KONTROL RELAY =================
+void setRelayState(uint8_t relayNum, bool state) {
+  if (relayNum >= 1 && relayNum <= NUM_RELAYS) {
+    int idx = relayNum - 1;
+    relayStates[idx] = state;
+    digitalWrite(RELAY_PINS[idx], state ? RELAY_ON : RELAY_OFF);
+    Serial.print("[RELAY] Relay ");
+    Serial.print(relayNum);
+    Serial.print(" (GPIO ");
+    Serial.print(RELAY_PINS[idx]);
+    Serial.print(") -> ");
+    Serial.println(state ? "ON (LOW)" : "OFF (HIGH)");
+  } else if (relayNum == 0) { // 0 = Semua Relay Sekaligus
+    for (int i = 0; i < NUM_RELAYS; i++) {
+      relayStates[i] = state;
+      digitalWrite(RELAY_PINS[i], state ? RELAY_ON : RELAY_OFF);
+    }
+    Serial.print("[RELAY] Semua Relay (1-5) -> ");
+    Serial.println(state ? "ON (LOW)" : "OFF (HIGH)");
+  }
+}
+
+// Kirim konfirmasi status relay ke MQTT Broker
+void publishRelayStatus() {
+  if (!mqttClient.connected()) return;
+
+  char statusTopic[64];
+  snprintf(statusTopic, sizeof(statusTopic), "tambak/%s/relay/status", DEVICE_ID);
+
+  char statusPayload[128];
+  snprintf(statusPayload, sizeof(statusPayload),
+    "{\"relay1\":%d,\"relay2\":%d,\"relay3\":%d,\"relay4\":%d,\"relay5\":%d}",
+    relayStates[0] ? 1 : 0,
+    relayStates[1] ? 1 : 0,
+    relayStates[2] ? 1 : 0,
+    relayStates[3] ? 1 : 0,
+    relayStates[4] ? 1 : 0
+  );
+
+  mqttClient.publish(statusTopic, statusPayload);
+  Serial.print("[RELAY] Sync Status -> ");
+  Serial.println(statusPayload);
+}
+
+bool parseStatePayload(const String& payload) {
+  if (payload == "1" || payload == "ON" || payload == "on" || payload == "true" || payload == "TRUE") {
+    return true;
+  }
+  return false;
+}
+
+// Callback MQTT saat menerima pesan dari Website / Broker
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  char payloadStr[length + 1];
+  memcpy(payloadStr, payload, length);
+  payloadStr[length] = '\0';
+  String strPayload = String(payloadStr);
+  strPayload.trim();
+
+  Serial.print("[MQTT Perintah] Topik: ");
+  Serial.print(topic);
+  Serial.print(" | Payload: ");
+  Serial.println(strPayload);
+
+  String strTopic = String(topic);
+
+  // 1. Topic Relay Tunggal: tambak/<DEVICE_ID>/relay/1/set s/d 5/set
+  for (int i = 1; i <= NUM_RELAYS; i++) {
+    String sub = "/relay/" + String(i) + "/set";
+    if (strTopic.endsWith(sub) || strTopic.indexOf(sub) != -1) {
+      bool st = parseStatePayload(strPayload);
+      setRelayState(i, st);
+      publishRelayStatus();
+      return;
+    }
+  }
+
+  // 2. Topic Semua Relay: tambak/<DEVICE_ID>/relay/all/set
+  if (strTopic.endsWith("/relay/all/set") || strTopic.indexOf("/relay/all") != -1) {
+    bool st = parseStatePayload(strPayload);
+    setRelayState(0, st);
+    publishRelayStatus();
+    return;
+  }
+
+  // 3. Payload Format JSON: {"relay": 1, "state": 1} atau {"relay1": 1, ...}
+  if (strPayload.startsWith("{") && strPayload.endsWith("}")) {
+    StaticJsonDocument<128> doc;
+    DeserializationError error = deserializeJson(doc, strPayload);
+    if (!error) {
+      if (doc.containsKey("relay") && doc.containsKey("state")) {
+        int rNum = doc["relay"];
+        bool st = doc["state"].as<bool>() || (doc["state"] == 1);
+        setRelayState(rNum, st);
+        publishRelayStatus();
+        return;
+      }
+      bool changed = false;
+      for (int i = 1; i <= NUM_RELAYS; i++) {
+        String key = "relay" + String(i);
+        if (doc.containsKey(key)) {
+          bool st = doc[key].as<bool>() || (doc[key] == 1);
+          setRelayState(i, st);
+          changed = true;
+        }
+      }
+      if (changed) publishRelayStatus();
+    }
+  }
 }
 
 void reconnectMQTT() {
@@ -250,6 +359,16 @@ void reconnectMQTT() {
     Serial.print("...");
     if (mqttClient.connect(DEVICE_ID)) {
       Serial.println(" Terhubung!");
+
+      // Subscribe otomatis ke topik perintah relay untuk device ini
+      char subTopic[64];
+      snprintf(subTopic, sizeof(subTopic), "tambak/%s/relay/#", DEVICE_ID);
+      mqttClient.subscribe(subTopic);
+      Serial.print("[MQTT] Subscribed ke: ");
+      Serial.println(subTopic);
+
+      // Kirim status awal relay ke broker
+      publishRelayStatus();
     } else {
       Serial.print(" Gagal, rc=");
       Serial.print(mqttClient.state());
@@ -449,6 +568,7 @@ void setup() {
   // Inisialisasi GSM TTGO Telkomsel & MQTT
   setupGSMTTGO();
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
 }
 
 void loop() {
