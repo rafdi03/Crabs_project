@@ -1,50 +1,67 @@
-/*
- * Monitoring Tambak - ESP32 Firmware (Arduino IDE)
- * Integrasi Lengkap: DS18B20, DHT22, TDS, JSN-SR04T, MQTT, dan LCD TFT ILI9342 / ILI9341
- */
-
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <DHT.h>
-#include <ArduinoJson.h>
-#include <time.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <SPI.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <DHT.h>
 
-// ================= KONFIGURASI WIFI & MQTT =================
-const char* WIFI_SSID   = "Bayu";
-const char* WIFI_PASS   = "12345678";
+// ================= 1. ALOKASI PIN LCD ILI9342 =================
+#define TFT_CS        13  
+#define TFT_DC        12  
+#define TFT_RST       14  
+#define TFT_MOSI      19  
+#define TFT_SCLK      18  
 
-const char* MQTT_BROKER = "broker.emqx.io";
-const int   MQTT_PORT   = 1883;
-const char* DEVICE_ID   = "ESP32-001";
-const char* MQTT_TOPIC  = "tambak/ESP32-001/sensor";
+// ================= 2. ALOKASI PIN SENSOR =================
+#define DS18B20_PIN   15  
+#define DHT_PIN       4   
+#define DHT_TYPE      DHT22 
+#define TDS_ADC_PIN   34  
+#define TRIG_PIN      32   
+#define ECHO_PIN      36  
 
-// ================= DEFINISI PIN LCD ILI9342 =================
-#define TFT_CS       5   
-#define TFT_DC       17  
-#define TFT_RST      16  
+// ================= 3. ALOKASI PIN RELAY =================
+#define RELAY_1       25  
+#define RELAY_2       22  
+#define RELAY_3       32  
+#define RELAY_4       33  
+#define RELAY_5       21  
 
-// ================= DEFINISI PIN SENSOR =================
-#define DS18B20_PIN  33  // Suhu Air
-#define DHT_PIN      32  // Suhu & Kelembaban Lingkungan
-#define DHT_TYPE     DHT22 // Ubah ke DHT11 jika pakai DHT11
-#define TDS_ADC_PIN  34  // Analog Out Modul TDS / Hujan
-#define TRIG_PIN     14  // JSN-SR04T Trig
-#define ECHO_PIN     27  // JSN-SR04T Echo
+// DEFINISI WARNA MONOKROM
+#define COLOR_BG          ILI9341_BLACK // Hitam
+#define COLOR_TEXT        ILI9341_WHITE // Putih
+#define COLOR_TEXT_MUTED  0xC618        // Abu-abu Terang
+#define COLOR_BORDER      ILI9341_WHITE // Border Putih
 
-// ================= KALIBRASI ADC SENSOR HUJAN / TDS =================
 const int ADC_AIR_MURNI  = 3800; 
-const int PPM_AIR_MURNI  = 10;   
+const int PPM_AIR_MURNI  = 10;    
 const int ADC_AIR_KERAN  = 1500; 
-const int PPM_AIR_KERAN  = 150;  
+const int PPM_AIR_KERAN  = 150;   
 
-#define SCOUNT 20                
+#define SCOUNT 20
+int analogBuffer[SCOUNT];
+int analogBufferIndex = 0;
 
-// Class Custom Resolusi Full 320x240
+float lastSuhuAir = -999.0;
+int lastTdsPPM = -999;
+float lastJarakJSN = -999.0;
+float validJarakJSN = -999.0; // Menyimpan sampel valid JSN terakhir
+float lastSuhuUdara = -999.0;
+float lastLembapUdara = -999.0;
+float lastDO = -999.0;
+
+// Status Koneksi (Simulasi untuk Tampilan)
+bool isWifiConnected = false;
+bool isBrokerConnected = false;
+int animFrame = 0;
+
+enum SensorState { BACA_SUHU_AIR, BACA_TDS, BACA_JSN, BACA_DHT, BACA_DO };
+SensorState currentState = BACA_SUHU_AIR;
+
+unsigned long lastReadTime = 0;
+// Interval dinaikkan agar 1 siklus penuh (5 sensor) memakan waktu 2 detik (aman untuk DHT22)
+const unsigned long INTERVAL_GANTIAN = 400; 
+
 class ILI9342_Full : public Adafruit_ILI9341 {
   public:
     ILI9342_Full(int8_t cs, int8_t dc, int8_t rst) : Adafruit_ILI9341(cs, dc, rst) {}
@@ -56,18 +73,6 @@ OneWire oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
 DHT dht(DHT_PIN, DHT_TYPE);
 
-WiFiClient espClient;
-PubSubClient mqttClient(espClient);
-
-// Timing control
-unsigned long lastPublishTime = 0;
-const unsigned long PUBLISH_INTERVAL = 10000; // 10 Detik
-
-// Buffer Penyaring Noise ADC
-int analogBuffer[SCOUNT];
-int analogBufferIndex = 0;
-
-// Filter Median
 int getMedianNum(int bArray[], int iFilterLen) {
   int bTab[iFilterLen];
   for (byte i = 0; i < iFilterLen; i++) bTab[i] = bArray[i];
@@ -86,7 +91,7 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
-int hitungPPMdarimodulHujan(int adcRaw) {
+int hitungPPM(int adcRaw) {
   long ppm = map(adcRaw, ADC_AIR_MURNI, ADC_AIR_KERAN, PPM_AIR_MURNI, PPM_AIR_KERAN);
   if (ppm < 0) ppm = 0;
   return (int)ppm;
@@ -94,135 +99,269 @@ int hitungPPMdarimodulHujan(int adcRaw) {
 
 float bacaJarakJSN() {
   digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(5);
   digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
+  delayMicroseconds(20);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000); 
-  if (duration == 0) return 0.0f;
-  return (duration * 0.0343f / 2.0f);
+  long duration = pulseIn(ECHO_PIN, HIGH, 40000);
+  
+  // Jika timeout atau gagal baca pulsa
+  if (duration <= 0) return -1.0;
+  
+  float dist = (duration * 0.0343 / 2.0);
+  
+  // Validasi rentang fisik JSN-SR04T (10 cm s/d 450 cm)
+  if (dist < 10.0 || dist > 450.0) {
+    return -1.0; // Nilai tidak valid
+  }
+  
+  return dist;
 }
 
-void setILI9342RotationMode2() {
-  uint8_t madctl = 0xC8;             
+float hitungDummyDO(float suhuAir) {
+  float baseDO = 6.5;
+  if (suhuAir > 0 && suhuAir < 50) {
+    baseDO = 10.0 - (0.15 * suhuAir); 
+  }
+  float noise = (random(-10, 11) / 100.0); 
+  float result = baseDO + noise;
+  if (result < 3.0) result = 3.0;
+  if (result > 9.0) result = 9.0;
+  return result;
+}
+
+void setILI9342Rotation() {
+  uint8_t madctl = 0xC8; 
   tft.sendCommand(0x36, &madctl, 1);
   tft.setFullResolution();
 }
 
-void gambarLayoutUI() {
-  tft.fillScreen(ILI9341_BLACK);
+// ================= FUNGSI ANIMASI INDIKATOR KONEKSI =================
 
-  // Header 320px
-  tft.fillRect(0, 0, 320, 28, 0x0015); 
-  tft.drawFastHLine(0, 28, 320, ILI9341_CYAN);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(50, 6);
-  tft.println("MONITORING TAMBAK");
-
-  // Grid 1: SUHU AIR & DHT (Atas Kiri)
-  tft.drawRoundRect(4, 32, 154, 98, 5, ILI9341_YELLOW);
-  tft.setTextColor(ILI9341_YELLOW);
+void updateConnectionStatus() {
+  // Area Status Bar Atas
+  tft.fillRect(0, 0, 320, 22, COLOR_BG);
   tft.setTextSize(1);
-  tft.setCursor(10, 38);
-  tft.println("SUHU AIR & DHT");
-
-  // Grid 2: TDS (Atas Kanan)
-  tft.drawRoundRect(162, 32, 154, 98, 5, ILI9341_GREEN);
-  tft.setTextColor(ILI9341_GREEN);
-  tft.setTextSize(1);
-  tft.setCursor(170, 38);
-  tft.println("TDS (ESTIMASI PPM)");
-
-  // Grid 3: JARAK JSN (Bawah Kiri)
-  tft.drawRoundRect(4, 134, 154, 102, 5, ILI9341_CYAN);
-  tft.setTextColor(ILI9341_CYAN);
-  tft.setTextSize(1);
-  tft.setCursor(10, 140);
-  tft.println("KETINGGIAN AIR");
-
-  // Grid 4: OKSIGEN / DO (Bawah Kanan)
-  tft.drawRoundRect(162, 134, 154, 102, 5, ILI9341_MAGENTA);
-  tft.setTextColor(ILI9341_MAGENTA);
-  tft.setTextSize(1);
-  tft.setCursor(170, 140);
-  tft.println("OKSIGEN (DO)");
-}
-
-// ================= KONEKSI NETWORK =================
-void setupWiFi() {
-  Serial.print("Menghubungkan ke WiFi ");
-  Serial.println(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi Terhubung!");
-}
-
-void setupNTP() {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  struct tm timeinfo;
-  int retry = 0;
-  while (!getLocalTime(&timeinfo) && retry < 5) {
-    delay(1000);
-    retry++;
-  }
-}
-
-String getTimestamp() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return "1970-01-01T00:00:00Z";
-  char timeBuffer[64];
-  strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-  return String(timeBuffer);
-}
-
-void reconnectMQTT() {
-  while (!mqttClient.connected()) {
-    if (mqttClient.connect(DEVICE_ID)) {
-      Serial.println("MQTT Terhubung!");
-    } else {
-      delay(3000);
+  
+  // 1. Status WiFi
+  tft.setCursor(6, 7);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.print("WIFI: ");
+  
+  if (isWifiConnected) {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.print("[OK]");
+  } else {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.print("CONNECTING");
+    // Efek titik animasi ( .  ..  ... )
+    for (int i = 0; i < (animFrame % 4); i++) {
+      tft.print(".");
     }
+  }
+
+  // 2. Status Broker MQTT
+  tft.setCursor(180, 7);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.print("MQTT: ");
+  
+  if (isBrokerConnected) {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.print("[CONNECTED]");
+  } else {
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    if (!isWifiConnected) {
+      tft.print("WAIT WIFI");
+    } else {
+      tft.setTextColor(COLOR_TEXT, COLOR_BG);
+      tft.print("CONNECTING");
+      for (int i = 0; i < (animFrame % 4); i++) {
+        tft.print(".");
+      }
+    }
+  }
+
+  tft.drawFastHLine(0, 22, 320, COLOR_BORDER);
+  
+  animFrame++;
+  
+  // Simulasi otomatis terhubung setelah beberapa detik (Bisa dihapus jika disambungkan ke fungsi WiFi/MQTT asli)
+  if (animFrame == 6) isWifiConnected = true;
+  if (animFrame == 10) isBrokerConnected = true;
+}
+
+// ================= FUNGSI UPDATE DISPLAY LCD =================
+
+void updateDisplaySuhuAir(float suhu) {
+  tft.fillRect(6, 52, 150, 38, COLOR_BG);
+  tft.setCursor(12, 57);
+  if (suhu == DEVICE_DISCONNECTED_C || suhu == -127.0 || suhu == -999.0) {
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("WAITING...");
+  } else {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(3);
+    tft.print(suhu, 1);
+    tft.setTextSize(2);
+    tft.print(" C");
+  }
+}
+
+void updateDisplayTDS(int ppm) {
+  tft.fillRect(164, 52, 150, 38, COLOR_BG);
+  tft.setCursor(170, 57);
+  if (ppm == -999) {
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("WAITING...");
+  } else {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(3);
+    tft.print(ppm);
+    tft.setTextSize(2);
+    tft.print(" PPM");
+  }
+}
+
+void updateDisplayJSN(float jarak) {
+  tft.fillRect(6, 118, 150, 38, COLOR_BG);
+  tft.setCursor(12, 123);
+  if (jarak < 0 || jarak == -999.0) {
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("WAITING...");
+  } else {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(3);
+    tft.print(jarak, 1);
+    tft.setTextSize(2);
+    tft.print(" cm");
+  }
+}
+
+void updateDisplayDO(float doVal) {
+  tft.fillRect(164, 118, 150, 38, COLOR_BG);
+  tft.setCursor(170, 123);
+  if (doVal == -999.0) {
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("WAITING...");
+  } else {
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(3);
+    tft.print(doVal, 2);
+    tft.setTextSize(2);
+    tft.print(" mg");
+  }
+}
+
+void updateDisplayDHT(float tUdara, float hUdara) {
+  tft.fillRect(6, 182, 308, 50, COLOR_BG);
+  
+  if (isnan(tUdara) || isnan(hUdara) || tUdara == -999.0) {
+    tft.setCursor(100, 197);
+    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("WAITING...");
+  } else {
+    tft.setCursor(12, 186);
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("Suhu Udara : ");
+    tft.print(tUdara, 1);
+    tft.print(" C");
+
+    tft.setCursor(12, 210);
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.setTextSize(2);
+    tft.print("Kelembapan : ");
+    tft.print(hUdara, 1);
+    tft.print(" %");
   }
 }
 
 void setup() {
   Serial.begin(115200);
 
-  // Setup Pin Hardware
   pinMode(TDS_ADC_PIN, INPUT);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+  
+  pinMode(RELAY_1, OUTPUT); digitalWrite(RELAY_1, HIGH);
+  pinMode(RELAY_2, OUTPUT); digitalWrite(RELAY_2, HIGH);
+  pinMode(RELAY_3, OUTPUT); digitalWrite(RELAY_3, HIGH);
+  pinMode(RELAY_4, OUTPUT); digitalWrite(RELAY_4, HIGH);
+  pinMode(RELAY_5, OUTPUT); digitalWrite(RELAY_5, HIGH);
+  
+  ds18b20.begin();
+  // Mode Non-Blocking untuk DS18B20 agar tidak ada jeda 750ms
+  ds18b20.setWaitForConversion(false); 
+  ds18b20.requestTemperatures();       
+  
+  dht.begin();
 
-  // Init LCD
   pinMode(TFT_RST, OUTPUT);
   digitalWrite(TFT_RST, HIGH); delay(50);
   digitalWrite(TFT_RST, LOW);  delay(150);
   digitalWrite(TFT_RST, HIGH); delay(150);
 
+  SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+  
   tft.begin();
   SPI.setFrequency(10000000);
-  setILI9342RotationMode2();
-  tft.invertDisplay(true);
+  setILI9342Rotation();
+  
+  tft.invertDisplay(true); 
 
-  gambarLayoutUI();
+  tft.fillScreen(COLOR_BG);
 
-  // Init Sensor & Network
-  ds18b20.begin();
-  dht.begin();
-  setupWiFi();
-  setupNTP();
+  // --- CARD 1: Suhu Air ---
+  tft.drawRoundRect(4, 30, 154, 60, 4, COLOR_BORDER);
+  tft.setCursor(10, 35);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.setTextSize(1);
+  tft.println("SUHU AIR (DS18B20)");
 
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  // --- CARD 2: TDS ---
+  tft.drawRoundRect(162, 30, 154, 60, 4, COLOR_BORDER);
+  tft.setCursor(168, 35);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.setTextSize(1);
+  tft.println("TDS (ESTIMASI PPM)");
+
+  // --- CARD 3: Ketinggian Air ---
+  tft.drawRoundRect(4, 96, 154, 60, 4, COLOR_BORDER);
+  tft.setCursor(10, 101);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.setTextSize(1);
+  tft.println("AIR (JSN-SR04T)");
+
+  // --- CARD 4: DO Air ---
+  tft.drawRoundRect(162, 96, 154, 60, 4, COLOR_BORDER);
+  tft.setCursor(168, 101);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.setTextSize(1);
+  tft.println("DO SENSOR (DUMMY)");
+
+  // --- CARD 5: Udara (DHT22) ---
+  tft.drawRoundRect(4, 162, 312, 74, 4, COLOR_BORDER);
+  tft.setCursor(10, 167);
+  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
+  tft.setTextSize(1);
+  tft.println("UDARA (DHT22)");
+
+  // Tampilan Status Awal
+  updateConnectionStatus();
+  updateDisplaySuhuAir(lastSuhuAir);
+  updateDisplayTDS(lastTdsPPM);
+  updateDisplayJSN(lastJarakJSN);
+  updateDisplayDO(lastDO);
+  updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
 }
 
 void loop() {
-  // Sampling ADC TDS (Background Process)
   static unsigned long sampleTime = millis();
   if (millis() - sampleTime > 30U) {
     sampleTime = millis();
@@ -231,108 +370,62 @@ void loop() {
     if (analogBufferIndex == SCOUNT) analogBufferIndex = 0;
   }
 
-  // Koneksi Network Maintenance
-  if (WiFi.status() != WL_CONNECTED) setupWiFi();
-  if (!mqttClient.connected()) reconnectMQTT();
-  mqttClient.loop();
-
-  // Task Rutin: Baca Sensor, Update LCD & Publish MQTT
-  unsigned long now = millis();
-  if (now - lastPublishTime >= PUBLISH_INTERVAL) {
-    lastPublishTime = now;
-
-    // 1. Baca Suhu Air (DS18B20)
-    ds18b20.requestTemperatures();
-    float suhu_air = ds18b20.getTempCByIndex(0);
-    if (suhu_air == DEVICE_DISCONNECTED_C || suhu_air == -127.0) suhu_air = 0.0f;
-
-    // 2. Baca DHT
-    float suhu_lingkungan = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    if (isnan(suhu_lingkungan)) suhu_lingkungan = 0.0f;
-    if (isnan(humidity)) humidity = 0.0f;
-
-    // 3. Baca TDS ADC
-    int medianADC = getMedianNum(analogBuffer, SCOUNT);
-    float tds_val = (float)hitungPPMdarimodulHujan(medianADC);
-
-    // 4. Data Dummy Khusus JSN Jarak Air Tambak (Masuk akal: 30 - 35 cm dengan riak halus)
-    static float jsn_baseline = 32.5f;
-    float riak_air = (float)random(-35, 36) / 100.0f; // Fluktuasi riak air ±0.35 cm
-    jsn_baseline += (float)random(-5, 6) / 100.0f;     // Drift pasang-surut halus
-    if (jsn_baseline < 29.0f) jsn_baseline = 29.0f;
-    if (jsn_baseline > 35.0f) jsn_baseline = 35.0f;
-    float jsn_val = jsn_baseline + riak_air;
-
-    // 5. Placeholder / Dummy Values
-    float nitrat_val = 0.0f;
-    float do_val = 6.8f; // Dissolved Oxygen
-
-    // ================= UPDATE TAMPILAN LCD =================
+  if (millis() - lastReadTime >= INTERVAL_GANTIAN) {
+    lastReadTime = millis();
     
-    // A. SUHU AIR & DHT
-    tft.fillRect(8, 52, 146, 74, ILI9341_BLACK); 
-    tft.setCursor(12, 54);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(2);
-    if (suhu_air == 0.0f) {
-      tft.print("DS : ERR");
-    } else {
-      tft.print("DS :"); tft.print(suhu_air, 1); tft.println(" C");
+    updateConnectionStatus();
+
+    switch (currentState) {
+      case BACA_SUHU_AIR:
+        // Ambil suhu dari request sebelumnya
+        lastSuhuAir = ds18b20.getTempCByIndex(0);
+        updateDisplaySuhuAir(lastSuhuAir);
+        
+        // Request suhu SEKARANG untuk diambil pada rotasi berikutnya (Asynchronous)
+        ds18b20.requestTemperatures(); 
+        
+        currentState = BACA_TDS;
+        break;
+
+      case BACA_TDS: {
+        int medianADC = getMedianNum(analogBuffer, SCOUNT);
+        lastTdsPPM = hitungPPM(medianADC);
+        updateDisplayTDS(lastTdsPPM);
+        currentState = BACA_JSN;
+        break;
+      }
+
+      case BACA_JSN: {
+        float curJarak = bacaJarakJSN();
+        if (curJarak > 0.0) {
+          // Sampel baru valid: simpan sebagai sampel valid terakhir
+          validJarakJSN = curJarak;
+          lastJarakJSN = curJarak;
+        } else {
+          // Sampel baru tidak valid: gunakan sampel valid sebelumnya agar tidak muncul WAITING
+          if (validJarakJSN > 0.0) {
+            lastJarakJSN = validJarakJSN;
+          } else {
+            lastJarakJSN = -999.0; // Hanya WAITING jika belum pernah terbaca sejak boot awal
+          }
+        }
+        updateDisplayJSN(lastJarakJSN);
+        currentState = BACA_DHT;
+        break;
+      }
+
+      case BACA_DHT:
+        lastSuhuUdara = dht.readTemperature();
+        lastLembapUdara = dht.readHumidity();
+        updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
+        currentState = BACA_DO;
+        break;
+
+      case BACA_DO:
+        lastDO = hitungDummyDO(lastSuhuAir);
+        updateDisplayDO(lastDO);
+        currentState = BACA_SUHU_AIR;
+        break;
     }
-
-    tft.setCursor(12, 76);
-    tft.setTextSize(1);
-    tft.setTextColor(ILI9341_ORANGE);
-    tft.print("DHT :"); tft.print(suhu_lingkungan, 1); tft.println(" C");
-    tft.setCursor(12, 92);
-    tft.print("Hum :"); tft.print(humidity, 1); tft.println(" %");
-
-    // B. TDS
-    tft.fillRect(166, 52, 146, 74, ILI9341_BLACK); 
-    tft.setCursor(170, 65);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3);
-    tft.print((int)tds_val);
-    tft.setTextSize(2);
-    tft.setTextColor(ILI9341_GREEN);
-    tft.print(" PPM");
-
-    // C. JARAK JSN
-    tft.fillRect(8, 155, 146, 75, ILI9341_BLACK); 
-    tft.setCursor(12, 168);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3); 
-    tft.print(jsn_val, 1);
-    tft.setTextSize(2);
-    tft.setTextColor(ILI9341_CYAN);
-    tft.println(" cm");
-
-    // D. OKSIGEN DO
-    tft.fillRect(166, 155, 146, 75, ILI9341_BLACK); 
-    tft.setCursor(170, 168);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3);
-    tft.print(do_val, 1);
-    tft.setTextSize(2);
-    tft.setTextColor(ILI9341_MAGENTA);
-    tft.print(" mg/L");
-
-    // ================= PUBLISH MQTT JSON =================
-    StaticJsonDocument<256> doc;
-    doc["device_id"]  = DEVICE_ID;
-    doc["suhu_air"]   = (suhu_air != -999.0 && suhu_air != -127.0 && suhu_air != 0.0f) ? suhu_air : 0.0;
-    doc["tds_ppm"]    = (tds_val != -999) ? (int)tds_val : 0;
-    doc["jarak_cm"]   = (jsn_val > 0) ? jsn_val : 0.0;
-    doc["suhu_udara"] = (!isnan(suhu_lingkungan)) ? suhu_lingkungan : 0.0;
-    doc["lembap_udr"] = (!isnan(humidity)) ? humidity : 0.0;
-    doc["do_mg"]      = (do_val != -999.0) ? do_val : 0.0;
-
-    char jsonBuffer[256];
-    serializeJson(doc, jsonBuffer);
-
-    Serial.print("Publish MQTT: ");
-    Serial.println(jsonBuffer);
-    mqttClient.publish(MQTT_TOPIC, jsonBuffer);
   }
 }

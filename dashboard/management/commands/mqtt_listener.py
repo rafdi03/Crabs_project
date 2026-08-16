@@ -17,7 +17,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):
-    help = 'Production MQTT Listener - 100% Real Sensor Data from ESP32'
+    help = 'Production MQTT Listener'
 
     # Configuration
     BROKER = os.environ.get('MQTT_BROKER', 'broker.emqx.io')
