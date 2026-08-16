@@ -6,26 +6,26 @@
 #include <DHT.h>
 
 // ================= 1. ALOKASI PIN LCD ILI9342 =================
-#define TFT_CS        13  
-#define TFT_DC        12  
-#define TFT_RST       14  
-#define TFT_MOSI      19  
+#define TFT_CS        5  
+#define TFT_DC        4  
+#define TFT_RST       2  
+#define TFT_MOSI      23  
 #define TFT_SCLK      18  
 
 // ================= 2. ALOKASI PIN SENSOR =================
-#define DS18B20_PIN   15  
-#define DHT_PIN       4   
+#define DHT_PIN       15    // Suhu & Kelembaban (DHT22 pada D15)
+#define DS18B20_PIN   13    // Suhu Air (DS18B20 pada D13)
 #define DHT_TYPE      DHT22 
-#define TDS_ADC_PIN   34  
-#define TRIG_PIN      32   
-#define ECHO_PIN      36  
+#define TDS_ADC_PIN   34    // TDS (D34 / ADC1)
+#define TRIG_PIN      14    // JSN-SR04T Trig (D14)
+#define ECHO_PIN      27    // JSN-SR04T Echo (D27)
 
 // ================= 3. ALOKASI PIN RELAY =================
 #define RELAY_1       25  
-#define RELAY_2       22  
+#define RELAY_2       26  
 #define RELAY_3       32  
 #define RELAY_4       33  
-#define RELAY_5       21  
+#define RELAY_5       22  
 
 // DEFINISI WARNA MONOKROM
 #define COLOR_BG          ILI9341_BLACK // Hitam
@@ -48,6 +48,8 @@ float lastJarakJSN = -999.0;
 float validJarakJSN = -999.0; // Menyimpan sampel valid JSN terakhir
 float lastSuhuUdara = -999.0;
 float lastLembapUdara = -999.0;
+float validSuhuUdara = -999.0;  // Menyimpan sampel valid suhu DHT terakhir
+float validLembapUdara = -999.0; // Menyimpan sampel valid kelembaban DHT terakhir
 float lastDO = -999.0;
 
 // Status Koneksi (Simulasi untuk Tampilan)
@@ -286,6 +288,7 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(TDS_ADC_PIN, INPUT);
+  pinMode(DHT_PIN, INPUT_PULLUP);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
@@ -414,12 +417,27 @@ void loop() {
         break;
       }
 
-      case BACA_DHT:
-        lastSuhuUdara = dht.readTemperature();
-        lastLembapUdara = dht.readHumidity();
+      case BACA_DHT: {
+        float t = dht.readTemperature();
+        float h = dht.readHumidity();
+        if (!isnan(t) && !isnan(h) && t > 0.0 && h > 0.0) {
+          validSuhuUdara = t;
+          validLembapUdara = h;
+          lastSuhuUdara = t;
+          lastLembapUdara = h;
+        } else {
+          if (validSuhuUdara > 0.0) {
+            lastSuhuUdara = validSuhuUdara;
+            lastLembapUdara = validLembapUdara;
+          } else {
+            lastSuhuUdara = -999.0;
+            lastLembapUdara = -999.0;
+          }
+        }
         updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
         currentState = BACA_DO;
         break;
+      }
 
       case BACA_DO:
         lastDO = hitungDummyDO(lastSuhuAir);
