@@ -694,10 +694,10 @@
                                     </p>
                                 </div>
                                 <div class="relay-master-btn-group">
-                                    <button class="btn btn-master-on" onclick="toggleAllRelay('{{ item.alat.id_alat }}', true)">
+                                    <button class="btn btn-master-on" id="btn_master_on_{{ item.alat.id_alat }}" onclick="toggleAllRelay('{{ item.alat.id_alat }}', true)">
                                         <i class="bi bi-lightning-charge-fill me-1"></i> Nyalakan Semua
                                     </button>
-                                    <button class="btn btn-master-off" onclick="toggleAllRelay('{{ item.alat.id_alat }}', false)">
+                                    <button class="btn btn-master-off" id="btn_master_off_{{ item.alat.id_alat }}" onclick="toggleAllRelay('{{ item.alat.id_alat }}', false)">
                                         <i class="bi bi-power me-1"></i> Matikan Semua
                                     </button>
                                 </div>
@@ -711,7 +711,7 @@
                                         <i class="bi bi-fan"></i>
                                     </div>
                                     <div class="relay-title">Pompa 1 / Aerator</div>
-                                    <div><span class="relay-pin">GPIO 25 (D25)</span></div>
+                                    <div><span class="relay-pin">GPIO 25</span></div>
                                     <div>
                                         <span class="relay-status-badge {% if item.relay_state.relay1 %}status-on{% else %}status-off{% endif %}" id="relay_badge_{{ item.alat.id_alat }}_1">
                                             {% if item.relay_state.relay1 %}ON (AKTIF){% else %}OFF (MATI){% endif %}
@@ -725,13 +725,13 @@
                                     </button>
                                 </div>
 
-                                <!-- Relay 2 (D16) -->
+                                <!-- Relay 2 (D22) -->
                                 <div class="relay-card {% if item.relay_state.relay2 %}is-on{% endif %}" id="relay_card_{{ item.alat.id_alat }}_2">
                                     <div class="relay-icon-wrapper">
                                         <i class="bi bi-water"></i>
                                     </div>
                                     <div class="relay-title">Pompa 2 / Aerator</div>
-                                    <div><span class="relay-pin">GPIO 26 (D26)</span></div>
+                                    <div><span class="relay-pin">GPIO 22</span></div>
                                     <div>
                                         <span class="relay-status-badge {% if item.relay_state.relay2 %}status-on{% else %}status-off{% endif %}" id="relay_badge_{{ item.alat.id_alat }}_2">
                                             {% if item.relay_state.relay2 %}ON (AKTIF){% else %}OFF (MATI){% endif %}
@@ -745,13 +745,13 @@
                                     </button>
                                 </div>
 
-                                <!-- Relay 3 (D17) -->
+                                <!-- Relay 3 (D0) -->
                                 <div class="relay-card {% if item.relay_state.relay3 %}is-on{% endif %}" id="relay_card_{{ item.alat.id_alat }}_3">
                                     <div class="relay-icon-wrapper">
                                         <i class="bi bi-fire"></i>
                                     </div>
                                     <div class="relay-title">Pemanas / Heater</div>
-                                    <div><span class="relay-pin">GPIO 32 (D32)</span></div>
+                                    <div><span class="relay-pin">GPIO 0</span></div>
                                     <div>
                                         <span class="relay-status-badge {% if item.relay_state.relay3 %}status-on{% else %}status-off{% endif %}" id="relay_badge_{{ item.alat.id_alat }}_3">
                                             {% if item.relay_state.relay3 %}ON (AKTIF){% else %}OFF (MATI){% endif %}
@@ -765,13 +765,13 @@
                                     </button>
                                 </div>
 
-                                <!-- Relay 4 (D13) -->
+                                <!-- Relay 4 (D33) -->
                                 <div class="relay-card {% if item.relay_state.relay4 %}is-on{% endif %}" id="relay_card_{{ item.alat.id_alat }}_4">
                                     <div class="relay-icon-wrapper">
                                         <i class="bi bi-egg-fried"></i>
                                     </div>
                                     <div class="relay-title">Feeder Pakan</div>
-                                    <div><span class="relay-pin">GPIO 33 (D33)</span></div>
+                                    <div><span class="relay-pin">GPIO 33</span></div>
                                     <div>
                                         <span class="relay-status-badge {% if item.relay_state.relay4 %}status-on{% else %}status-off{% endif %}" id="relay_badge_{{ item.alat.id_alat }}_4">
                                             {% if item.relay_state.relay4 %}ON (AKTIF){% else %}OFF (MATI){% endif %}
@@ -785,13 +785,13 @@
                                     </button>
                                 </div>
 
-                                <!-- Relay 5 (D14) -->
+                                <!-- Relay 5 (D21) -->
                                 <div class="relay-card {% if item.relay_state.relay5 %}is-on{% endif %}" id="relay_card_{{ item.alat.id_alat }}_5">
                                     <div class="relay-icon-wrapper">
                                         <i class="bi bi-sliders"></i>
                                     </div>
                                     <div class="relay-title">Solenoid Valve</div>
-                                    <div><span class="relay-pin">GPIO 22 (D22)</span></div>
+                                    <div><span class="relay-pin">GPIO 21</span></div>
                                     <div>
                                         <span class="relay-status-badge {% if item.relay_state.relay5 %}status-on{% else %}status-off{% endif %}" id="relay_badge_{{ item.alat.id_alat }}_5">
                                             {% if item.relay_state.relay5 %}ON (AKTIF){% else %}OFF (MATI){% endif %}
@@ -1192,8 +1192,11 @@
             return el ? el.value : '';
         }
 
+        let lastRelayActionTime = 0;
+
         // 1. Fungsi Toggle Relay Individual
         function toggleRelay(idAlat, relayNum, targetState) {
+            lastRelayActionTime = Date.now();
             const btn = document.getElementById(`relay_btn_${idAlat}_${relayNum}`);
             if (btn) {
                 btn.disabled = true;
@@ -1231,6 +1234,28 @@
 
         // 2. Fungsi Toggle Semua Relay Sekaligus (All ON / All OFF)
         function toggleAllRelay(idAlat, targetState) {
+            lastRelayActionTime = Date.now();
+
+            const masterBtnOn = document.getElementById(`btn_master_on_${idAlat}`);
+            const masterBtnOff = document.getElementById(`btn_master_off_${idAlat}`);
+            
+            if (masterBtnOn) masterBtnOn.disabled = true;
+            if (masterBtnOff) masterBtnOff.disabled = true;
+
+            const activeMasterBtn = targetState ? masterBtnOn : masterBtnOff;
+            if (activeMasterBtn) {
+                activeMasterBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Mengirim...`;
+            }
+
+            // Tampilkan status loading di seluruh 5 tombol relay satuan
+            for (let i = 1; i <= 5; i++) {
+                const btn = document.getElementById(`relay_btn_${idAlat}_${i}`);
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Mengirim...`;
+                }
+            }
+
             fetch('/api/relay-control/', {
                 method: 'POST',
                 headers: {
@@ -1253,13 +1278,28 @@
             })
             .catch(err => {
                 console.error('All relay error:', err);
+                alert('Terjadi kesalahan koneksi ke server.');
+            })
+            .finally(() => {
+                if (masterBtnOn) {
+                    masterBtnOn.disabled = false;
+                    masterBtnOn.innerHTML = `<i class="bi bi-lightning-charge-fill me-1"></i> Nyalakan Semua`;
+                }
+                if (masterBtnOff) {
+                    masterBtnOff.disabled = false;
+                    masterBtnOff.innerHTML = `<i class="bi bi-power me-1"></i> Matikan Semua`;
+                }
+                for (let i = 1; i <= 5; i++) {
+                    const btn = document.getElementById(`relay_btn_${idAlat}_${i}`);
+                    if (btn) btn.disabled = false;
+                }
             });
         }
 
         // 3. Fungsi Pembaruan UI Relay Secara Dinamis
         function updateRelayUI(idAlat, states) {
             for (let i = 1; i <= 5; i++) {
-                const isOn = states[`relay${i}`];
+                const isOn = Boolean(states[`relay${i}`]);
                 const card = document.getElementById(`relay_card_${idAlat}_${i}`);
                 const badge = document.getElementById(`relay_badge_${idAlat}_${i}`);
                 const btn = document.getElementById(`relay_btn_${idAlat}_${i}`);
@@ -1273,9 +1313,10 @@
                     badge.innerText = isOn ? 'ON (AKTIF)' : 'OFF (MATI)';
                 }
                 if (btn) {
+                    btn.disabled = false;
                     btn.className = `btn btn-relay-toggle ${isOn ? 'btn-turn-off' : 'btn-turn-on'}`;
                     btn.innerHTML = `<i class="bi ${isOn ? 'bi-power' : 'bi-lightning-charge'}"></i> <span>${isOn ? 'Matikan' : 'Nyalakan'}</span>`;
-                    btn.setAttribute('onclick', `toggleRelay('${idAlat}', ${i}, ${!isOn})`);
+                    btn.onclick = function() { toggleRelay(idAlat, i, !isOn); };
                 }
             }
         }
@@ -1368,8 +1409,8 @@
                 boxTds.className = 'sensor-item ' + (msg.tds_css === 'success' ? 'status-good' : msg.tds_css === 'warning' ? 'status-warning' : 'status-danger');
             }
 
-            // 5. Update Status Relay jika dikirimkan bersama payload
-            if (msg.relay_states) {
+            // 5. Update Status Relay jika dikirimkan bersama payload (dan tidak sedang dalam masa transisi klik tombol)
+            if (msg.relay_states && (Date.now() - lastRelayActionTime > 3000)) {
                 updateRelayUI(id, msg.relay_states);
             }
 

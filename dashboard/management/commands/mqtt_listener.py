@@ -79,25 +79,33 @@ class Command(BaseCommand):
                     if 'relay5' in data: relay_state.relay5 = bool(data['relay5'])
                     relay_state.save()
                 elif 'set' in topic:
-                    # Parse dari topic misal "tambak/ESP32-001/relay/1/set"
+                    # Parse dari topic misal "tambak/ESP32-001/relay/1/set" atau "tambak/ESP32-001/relay/all/set"
                     parts = topic.split('/')
-                    if len(parts) >= 4 and parts[2].isdigit():
-                        r_num = int(parts[2])
-                        st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
-                        if r_num == 1: relay_state.relay1 = st
-                        elif r_num == 2: relay_state.relay2 = st
-                        elif r_num == 3: relay_state.relay3 = st
-                        elif r_num == 4: relay_state.relay4 = st
-                        elif r_num == 5: relay_state.relay5 = st
-                        relay_state.save()
-                    elif 'all' in topic:
-                        st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
+                    st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
+                    
+                    if 'all' in parts or 'all' in topic:
                         relay_state.relay1 = st
                         relay_state.relay2 = st
                         relay_state.relay3 = st
                         relay_state.relay4 = st
                         relay_state.relay5 = st
                         relay_state.save()
+                    else:
+                        # Cari nomor relay di bagian topik
+                        r_num = None
+                        for p in parts:
+                            if p.isdigit() and 1 <= int(p) <= 5:
+                                r_num = int(p)
+                                break
+                        
+                        if r_num == 1: relay_state.relay1 = st
+                        elif r_num == 2: relay_state.relay2 = st
+                        elif r_num == 3: relay_state.relay3 = st
+                        elif r_num == 4: relay_state.relay4 = st
+                        elif r_num == 5: relay_state.relay5 = st
+                        
+                        if r_num is not None:
+                            relay_state.save()
 
                 # Broadcast relay update ke WebSockets
                 channel_layer = get_channel_layer()
