@@ -12,4 +12,5 @@ urlpatterns = [
     path('api/chart-data/<str:alat_id>/', views.chart_data, name='chart_data'),
     path('api/relay-control/', views.relay_control, name='relay_control'),
     path('api/relay-status/<str:alat_id>/', views.get_relay_status, name='get_relay_status'),
+    path('api/sensor-terbaru/<str:alat_id>/', views.get_sensor_terbaru, name='get_sensor_terbaru'),
 ]

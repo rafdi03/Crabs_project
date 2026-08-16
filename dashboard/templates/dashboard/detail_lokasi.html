@@ -1280,41 +1280,230 @@
             }
         }
 
-        // 4. WebSocket Live Real-Time Data (Sensor & Relay Sync)
+        // 4. WebSocket Live Real-Time Data dengan Smart Auto-Polling Fallback
+        const activeDeviceIds = [{% for item in alat_data_list %}'{{ item.alat.id_alat }}',{% endfor %}];
+        let pollingTimer = null;
+        let lastSensorTimestamps = {};
+        let isWebSocketConnected = false;
+
         function updateWSStatus(status) {
             const badge = document.getElementById('wsConnectionStatus');
             if (!badge) return;
             if (status === 'connected') {
                 badge.className = 'badge rounded-pill bg-success-subtle text-success border border-success-subtle px-3 py-2';
-                badge.innerHTML = '<i class="bi bi-broadcast me-1 text-success"></i> Live Real-Time (Terhubung)';
+                badge.innerHTML = '<i class="bi bi-broadcast me-1 text-success"></i> Live Real-Time (WebSocket)';
+            } else if (status === 'polling') {
+                badge.className = 'badge rounded-pill bg-success-subtle text-success border border-success-subtle px-3 py-2';
+                badge.innerHTML = '<i class="bi bi-arrow-repeat me-1 text-success"></i> Live Real-Time (Auto-Sync)';
             } else if (status === 'connecting') {
                 badge.className = 'badge rounded-pill bg-warning-subtle text-warning border border-warning-subtle px-3 py-2';
                 badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Menghubungkan...';
             } else {
                 badge.className = 'badge rounded-pill bg-danger-subtle text-danger border border-danger-subtle px-3 py-2';
-                badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Terputus (Mencoba ulang...)';
+                badge.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i> Terputus';
             }
         }
 
+        // Fungsi Universal untuk Live Update Sensor (Mendukung WebSocket & Polling)
+        function applyLiveSensorUpdate(msg, source) {
+            const id = msg.id_alat;
+            if (!id) return;
+
+            const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
+            const doVal = (msg.do_mg !== undefined) ? msg.do_mg : msg.do;
+            const tdsVal = (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds;
+            const jsnVal = (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn;
+            const lembapVal = (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara;
+
+            // 1. Update Nilai di Kotak Sensor
+            const map = {
+                'do_': doVal,
+                'suhu_air_': msg.suhu_air,
+                'tds_': tdsVal,
+                'jsn_': jsnVal,
+                'suhu_lingkungan_': suhuUdrVal,
+                'suhu_udara_': suhuUdrVal,
+                'lembap_': lembapVal
+            };
+            for (const [prefix, val] of Object.entries(map)) {
+                if (val !== undefined) {
+                    const el = document.getElementById(prefix + id);
+                    if (el) {
+                        el.innerText = val;
+                        el.classList.remove('value-update');
+                        void el.offsetWidth;
+                        el.classList.add('value-update');
+                    }
+                }
+            }
+
+            // 2. Timestamp
+            const now = new Date();
+            const nowTimeStr = msg.time_only || now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const nowFullStr = msg.timestamp || (now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + now.toLocaleTimeString('id-ID'));
+
+            const timeEl = document.getElementById('time_' + id);
+            if (timeEl) {
+                timeEl.innerText = nowFullStr;
+            }
+
+            // 3. Status Badge
+            const statusBadge = document.getElementById('status_' + id);
+            if (statusBadge && msg.status_tambak) {
+                statusBadge.innerText = msg.status_tambak;
+                statusBadge.className = 'badge-status ' + (msg.badge_color === 'bg-success' ? 'online' : msg.badge_color === 'bg-warning text-dark' ? 'warning' : 'danger');
+            }
+
+            // 4. Warna Kotak Sensor
+            const boxDo = document.getElementById('box_do_' + id);
+            if (boxDo && msg.do_css) {
+                boxDo.className = 'sensor-item ' + (msg.do_css === 'success' ? 'status-good' : msg.do_css === 'warning' ? 'status-warning' : 'status-danger');
+            }
+            const boxSuhu = document.getElementById('box_suhu_' + id);
+            if (boxSuhu && msg.suhu_css) {
+                boxSuhu.className = 'sensor-item ' + (msg.suhu_css === 'success' ? 'status-good' : msg.suhu_css === 'warning' ? 'status-warning' : 'status-danger');
+            }
+            const boxTds = document.getElementById('box_tds_' + id);
+            if (boxTds && msg.tds_css) {
+                boxTds.className = 'sensor-item ' + (msg.tds_css === 'success' ? 'status-good' : msg.tds_css === 'warning' ? 'status-warning' : 'status-danger');
+            }
+
+            // 5. Update Status Relay jika dikirimkan bersama payload
+            if (msg.relay_states) {
+                updateRelayUI(id, msg.relay_states);
+            }
+
+            // =========================================================
+            // 🚀 LIVE UPDATE GRAFIK REAL-TIME
+            // =========================================================
+            if (window.realtimeCharts && window.realtimeCharts[id]) {
+                const charts = window.realtimeCharts[id];
+                
+                // Update Grafik Suhu
+                if (charts.suhu && msg.suhu_air !== undefined) {
+                    charts.suhu.data.labels.push(nowTimeStr);
+                    charts.suhu.data.datasets[0].data.push(msg.suhu_air);
+                    charts.suhu.data.datasets[1].data.push(suhuUdrVal);
+                    if (charts.suhu.data.labels.length > 20) {
+                        charts.suhu.data.labels.shift();
+                        charts.suhu.data.datasets[0].data.shift();
+                        charts.suhu.data.datasets[1].data.shift();
+                    }
+                    charts.suhu.update('none');
+                }
+
+                // Update Grafik Kualitas (DO & TDS)
+                if (charts.kualitas && doVal !== undefined) {
+                    charts.kualitas.data.labels.push(nowTimeStr);
+                    charts.kualitas.data.datasets[0].data.push(doVal);
+                    charts.kualitas.data.datasets[1].data.push(tdsVal);
+                    if (charts.kualitas.data.labels.length > 20) {
+                        charts.kualitas.data.labels.shift();
+                        charts.kualitas.data.datasets[0].data.shift();
+                        charts.kualitas.data.datasets[1].data.shift();
+                    }
+                    charts.kualitas.update('none');
+                }
+            }
+
+            // =========================================================
+            // 🚀 LIVE UPDATE TABEL RIWAYAT TERAKHIR
+            // =========================================================
+            const tbodyTerakhir = document.getElementById('tabelTerakhir_' + id);
+            if (tbodyTerakhir) {
+                const emptyRow = document.getElementById('empty_row_' + id);
+                if (emptyRow) emptyRow.remove();
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="text-nowrap">${nowFullStr}</td>
+                    <td>${doVal !== undefined ? doVal : '--'}</td>
+                    <td>${msg.suhu_air !== undefined ? msg.suhu_air : '--'}</td>
+                    <td>${tdsVal !== undefined ? tdsVal : '--'}</td>
+                    <td>${jsnVal !== undefined ? jsnVal : '--'}</td>
+                    <td>${suhuUdrVal !== undefined ? suhuUdrVal : '--'}</td>
+                `;
+                tr.style.backgroundColor = 'rgba(13, 110, 253, 0.08)';
+                tbodyTerakhir.insertBefore(tr, tbodyTerakhir.firstChild);
+
+                setTimeout(() => {
+                    tr.style.transition = 'background-color 1.2s ease';
+                    tr.style.backgroundColor = '';
+                }, 500);
+
+                while (tbodyTerakhir.children.length > 30) {
+                    tbodyTerakhir.removeChild(tbodyTerakhir.lastChild);
+                }
+            }
+        }
+
+        // =========================================================
+        // 🔄 SMART AUTO-POLLING FALLBACK (ANTI GAGAL)
+        // =========================================================
+        function startAutoPolling() {
+            if (pollingTimer || isWebSocketConnected) return;
+            console.log('🔄 Memulai Smart Auto-Polling (Live Fallback)...');
+            updateWSStatus('polling');
+
+            function pollAllDevices() {
+                if (isWebSocketConnected) {
+                    stopAutoPolling();
+                    return;
+                }
+                activeDeviceIds.forEach(id => {
+                    fetch('/api/sensor-terbaru/' + id + '/')
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                if (!lastSensorTimestamps[id] || lastSensorTimestamps[id] !== data.timestamp_iso) {
+                                    lastSensorTimestamps[id] = data.timestamp_iso;
+                                    applyLiveSensorUpdate(data, 'polling');
+                                }
+                            }
+                        })
+                        .catch(err => console.debug('Polling check:', err));
+                });
+            }
+
+            pollAllDevices();
+            pollingTimer = setInterval(pollAllDevices, 2000);
+        }
+
+        function stopAutoPolling() {
+            if (pollingTimer) {
+                clearInterval(pollingTimer);
+                pollingTimer = null;
+            }
+        }
+
+        // =========================================================
+        // 🔌 KONEKSI WEBSOCKET DENGAN AUTO-FAILOVER
+        // =========================================================
         function connectWebSocket() {
             updateWSStatus('connecting');
             const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            const socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
+            let socket = null;
+
+            try {
+                socket = new WebSocket(protocol + '://' + window.location.host + '/ws/sensor/');
+            } catch(e) {
+                console.warn('Inisialisasi WebSocket gagal, mengaktifkan auto-polling:', e);
+                startAutoPolling();
+                return;
+            }
 
             socket.onopen = function() {
                 console.log('✅ WebSocket Sensor & Relay terhubung.');
+                isWebSocketConnected = true;
+                stopAutoPolling();
                 updateWSStatus('connected');
             };
 
             socket.onmessage = function(e) {
-                const msg = JSON.parse(e.data);
                 try {
-                    const id = msg.id_alat;
-                    if (!id) return;
-
-                    // A. Jika pesan adalah update status RELAY
+                    const msg = JSON.parse(e.data);
                     if (msg.type === 'relay_update') {
-                        updateRelayUI(id, {
+                        updateRelayUI(msg.id_alat, {
                             relay1: msg.relay1,
                             relay2: msg.relay2,
                             relay3: msg.relay3,
@@ -1323,143 +1512,21 @@
                         });
                         return;
                     }
-
-                    // B. Jika pesan adalah update SENSOR
-                    const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
-                    const doVal = (msg.do_mg !== undefined) ? msg.do_mg : msg.do;
-                    const tdsVal = (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds;
-                    const jsnVal = (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn;
-                    const lembapVal = (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara;
-
-                    const map = {
-                        'do_': doVal,
-                        'suhu_air_': msg.suhu_air,
-                        'tds_': tdsVal,
-                        'jsn_': jsnVal,
-                        'suhu_lingkungan_': suhuUdrVal,
-                        'suhu_udara_': suhuUdrVal,
-                        'lembap_': lembapVal
-                    };
-                    for (const [prefix, val] of Object.entries(map)) {
-                        if (val !== undefined) {
-                            const el = document.getElementById(prefix + id);
-                            if (el) {
-                                el.innerText = val;
-                                el.classList.remove('value-update');
-                                void el.offsetWidth;
-                                el.classList.add('value-update');
-                            }
-                        }
-                    }
-
-                    // Timestamp
-                    const now = new Date();
-                    const nowTimeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    const nowFullStr = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + now.toLocaleTimeString('id-ID');
-
-                    const timeEl = document.getElementById('time_' + id);
-                    if (timeEl) {
-                        timeEl.innerText = nowFullStr;
-                    }
-
-                    // Status badge
-                    const statusBadge = document.getElementById('status_' + id);
-                    if (statusBadge && msg.status_tambak) {
-                        statusBadge.innerText = msg.status_tambak;
-                        statusBadge.className = 'badge-status ' + (msg.badge_color === 'bg-success' ? 'online' : msg.badge_color === 'bg-warning text-dark' ? 'warning' : 'danger');
-                    }
-
-                    // Warna Kotak Sensor
-                    const boxDo = document.getElementById('box_do_' + id);
-                    if (boxDo && msg.do_css) {
-                        boxDo.className = 'sensor-item ' + (msg.do_css === 'success' ? 'status-good' : msg.do_css === 'warning' ? 'status-warning' : 'status-danger');
-                    }
-                    const boxSuhu = document.getElementById('box_suhu_' + id);
-                    if (boxSuhu && msg.suhu_css) {
-                        boxSuhu.className = 'sensor-item ' + (msg.suhu_css === 'success' ? 'status-good' : msg.suhu_css === 'warning' ? 'status-warning' : 'status-danger');
-                    }
-                    const boxTds = document.getElementById('box_tds_' + id);
-                    if (boxTds && msg.tds_css) {
-                        boxTds.className = 'sensor-item ' + (msg.tds_css === 'success' ? 'status-good' : msg.tds_css === 'warning' ? 'status-warning' : 'status-danger');
-                    }
-
-                    // =========================================================
-                    // 🚀 LIVE UPDATE GRAFIK REAL-TIME
-                    // =========================================================
-                    if (window.realtimeCharts && window.realtimeCharts[id]) {
-                        const charts = window.realtimeCharts[id];
-                        
-                        // Update Grafik Suhu
-                        if (charts.suhu && msg.suhu_air !== undefined) {
-                            charts.suhu.data.labels.push(nowTimeStr);
-                            charts.suhu.data.datasets[0].data.push(msg.suhu_air);
-                            charts.suhu.data.datasets[1].data.push(suhuUdrVal);
-                            if (charts.suhu.data.labels.length > 20) {
-                                charts.suhu.data.labels.shift();
-                                charts.suhu.data.datasets[0].data.shift();
-                                charts.suhu.data.datasets[1].data.shift();
-                            }
-                            charts.suhu.update('none');
-                        }
-
-                        // Update Grafik Kualitas (DO & TDS)
-                        if (charts.kualitas && doVal !== undefined) {
-                            charts.kualitas.data.labels.push(nowTimeStr);
-                            charts.kualitas.data.datasets[0].data.push(doVal);
-                            charts.kualitas.data.datasets[1].data.push(tdsVal);
-                            if (charts.kualitas.data.labels.length > 20) {
-                                charts.kualitas.data.labels.shift();
-                                charts.kualitas.data.datasets[0].data.shift();
-                                charts.kualitas.data.datasets[1].data.shift();
-                            }
-                            charts.kualitas.update('none');
-                        }
-                    }
-
-                    // =========================================================
-                    // 🚀 LIVE UPDATE TABEL RIWAYAT TERAKHIR
-                    // =========================================================
-                    const tbodyTerakhir = document.getElementById('tabelTerakhir_' + id);
-                    if (tbodyTerakhir) {
-                        const emptyRow = document.getElementById('empty_row_' + id);
-                        if (emptyRow) emptyRow.remove();
-
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td class="text-nowrap">${nowFullStr}</td>
-                            <td>${doVal !== undefined ? doVal : '--'}</td>
-                            <td>${msg.suhu_air !== undefined ? msg.suhu_air : '--'}</td>
-                            <td>${tdsVal !== undefined ? tdsVal : '--'}</td>
-                            <td>${jsnVal !== undefined ? jsnVal : '--'}</td>
-                            <td>${suhuUdrVal !== undefined ? suhuUdrVal : '--'}</td>
-                        `;
-                        tr.style.backgroundColor = 'rgba(13, 110, 253, 0.08)';
-                        tbodyTerakhir.insertBefore(tr, tbodyTerakhir.firstChild);
-
-                        setTimeout(() => {
-                            tr.style.transition = 'background-color 1.2s ease';
-                            tr.style.backgroundColor = '';
-                        }, 500);
-
-                        while (tbodyTerakhir.children.length > 30) {
-                            tbodyTerakhir.removeChild(tbodyTerakhir.lastChild);
-                        }
-                    }
-
+                    applyLiveSensorUpdate(msg, 'websocket');
                 } catch(err) {
-                    console.warn('UI update error:', err);
+                    console.warn('Message parsing error:', err);
                 }
             };
 
             socket.onclose = function() {
-                console.warn('WebSocket terputus, mencoba reconnect dalam 3 detik...');
-                updateWSStatus('disconnected');
-                setTimeout(connectWebSocket, 3000);
+                isWebSocketConnected = false;
+                startAutoPolling();
+                setTimeout(connectWebSocket, 5000);
             };
 
-            socket.onerror = function(err) {
-                console.error('WebSocket error:', err);
-                updateWSStatus('disconnected');
+            socket.onerror = function() {
+                isWebSocketConnected = false;
+                startAutoPolling();
             };
         }
 

@@ -208,6 +208,89 @@ def get_relay_status(request, alat_id):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
+# 8. API Get Latest Sensor Data (Smart Fallback Polling jika WebSocket bermasalah)
+@login_required(login_url='login')
+def get_sensor_terbaru(request, alat_id):
+    try:
+        alat = get_object_or_404(Alat, id_alat=alat_id, status_aktif=True)
+        sensor = alat.data_sensor.first()
+        relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+
+        if not sensor:
+            return JsonResponse({'success': False, 'message': 'Belum ada data sensor'})
+
+        suhu_air_val = sensor.suhu_air
+        do_val = sensor.do_level
+        tds_val = sensor.tds_level
+        suhu_lingk_val = sensor.suhu_lingkungan
+        lembap_val = sensor.kelembaban_udara
+        jsn_val = sensor.jsn_distance
+
+        if 25 <= suhu_air_val <= 35:
+            skor_suhu = 5; css_suhu = "success"
+        elif 20 <= suhu_air_val < 25:
+            skor_suhu = 3; css_suhu = "warning"
+        else:
+            skor_suhu = 1; css_suhu = "danger"
+
+        if do_val > 4:
+            skor_do = 5; css_do = "success"
+        elif 3 <= do_val <= 4:
+            skor_do = 3; css_do = "warning"
+        else:
+            skor_do = 1; css_do = "danger"
+
+        if tds_val <= 500:
+            css_tds = "success"
+        elif tds_val <= 800:
+            css_tds = "warning"
+        else:
+            css_tds = "danger"
+
+        total_skor = (skor_suhu * 2) + (skor_do * 2)
+        if total_skor >= 16:
+            status_tambak = "KONDISI PRIMA (AMAN)"
+            badge_color = "bg-success"
+        elif total_skor >= 10:
+            status_tambak = "WASPADA (SEDANG)"
+            badge_color = "bg-warning text-dark"
+        else:
+            status_tambak = "KRITIS (BAHAYA)"
+            badge_color = "bg-danger"
+
+        return JsonResponse({
+            'success': True,
+            'id_alat': alat_id,
+            'suhu_air': suhu_air_val,
+            'suhu_lingkungan': suhu_lingk_val,
+            'suhu_udara': suhu_lingk_val,
+            'do': do_val,
+            'do_mg': do_val,
+            'tds': tds_val,
+            'tds_ppm': tds_val,
+            'jsn': jsn_val,
+            'jarak_cm': jsn_val,
+            'lembap_udr': lembap_val,
+            'kelembaban_udara': lembap_val,
+            'timestamp': sensor.timestamp.strftime('%d %b %Y, %H:%M:%S'),
+            'timestamp_iso': sensor.timestamp.isoformat(),
+            'time_only': sensor.timestamp.strftime('%H:%M:%S'),
+            'status_tambak': status_tambak,
+            'badge_color': badge_color,
+            'suhu_css': css_suhu,
+            'do_css': css_do,
+            'tds_css': css_tds,
+            'relay_states': {
+                'relay1': relay_state.relay1,
+                'relay2': relay_state.relay2,
+                'relay3': relay_state.relay3,
+                'relay4': relay_state.relay4,
+                'relay5': relay_state.relay5,
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
 # 8. Download CSV
 @login_required(login_url='login')
 def download_csv_lokasi(request, lokasi_id):
