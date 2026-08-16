@@ -241,6 +241,8 @@ void setupGSMTTGO() {
     return;
   }
   Serial.println(" GPRS Telkomsel Berhasil Terhubung!");
+}
+
 // ================= FUNGSI KONTROL RELAY =================
 void setRelayState(uint8_t relayNum, bool state) {
   if (relayNum >= 1 && relayNum <= NUM_RELAYS) {
