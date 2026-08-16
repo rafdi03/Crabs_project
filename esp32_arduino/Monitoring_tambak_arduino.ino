@@ -309,7 +309,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   String strTopic = String(topic);
 
-  // 1. Topic Relay Tunggal: tambak/<DEVICE_ID>/relay/1/set s/d 5/set
+  // 1. FILTER MUTLAK: Abaikan pesan status sendiri untuk mencegah loop echo!
+  if (strTopic.endsWith("/status") || strTopic.indexOf("/status") != -1) {
+    return;
+  }
+
+  // 2. Topic Relay Tunggal: tambak/<DEVICE_ID>/relay/1/set s/d 5/set
   for (int i = 1; i <= NUM_RELAYS; i++) {
     String sub = "/relay/" + String(i) + "/set";
     if (strTopic.endsWith(sub) || strTopic.indexOf(sub) != -1) {
@@ -320,7 +325,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  // 2. Topic Semua Relay: tambak/<DEVICE_ID>/relay/all/set
+  // 3. Topic Semua Relay: tambak/<DEVICE_ID>/relay/all/set
   if (strTopic.endsWith("/relay/all/set") || strTopic.indexOf("/relay/all") != -1) {
     bool st = parseStatePayload(strPayload);
     setRelayState(0, st);
@@ -328,7 +333,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
-  // 3. Payload Format JSON: {"relay": 1, "state": 1} atau {"relay1": 1, ...}
+  // 4. Payload Format JSON Perintah: {"relay": 1, "state": 1} atau {"relay1": 1, ...}
   if (strPayload.startsWith("{") && strPayload.endsWith("}")) {
     StaticJsonDocument<128> doc;
     DeserializationError error = deserializeJson(doc, strPayload);
@@ -362,12 +367,19 @@ void reconnectMQTT() {
     if (mqttClient.connect(DEVICE_ID)) {
       Serial.println(" Terhubung!");
 
-      // Subscribe otomatis ke topik perintah relay untuk device ini
-      char subTopic[64];
-      snprintf(subTopic, sizeof(subTopic), "tambak/%s/relay/#", DEVICE_ID);
-      mqttClient.subscribe(subTopic);
-      Serial.print("[MQTT] Subscribed ke: ");
-      Serial.println(subTopic);
+      // Subscribe khusus ke topik perintah set relay device ini
+      char subTopicSingle[64];
+      snprintf(subTopicSingle, sizeof(subTopicSingle), "tambak/%s/relay/+/set", DEVICE_ID);
+      mqttClient.subscribe(subTopicSingle);
+
+      char subTopicAll[64];
+      snprintf(subTopicAll, sizeof(subTopicAll), "tambak/%s/relay/all/set", DEVICE_ID);
+      mqttClient.subscribe(subTopicAll);
+
+      Serial.print("[MQTT] Subscribed perintah relay: ");
+      Serial.print(subTopicSingle);
+      Serial.print(" & ");
+      Serial.println(subTopicAll);
 
       // Kirim status awal relay ke broker
       publishRelayStatus();
