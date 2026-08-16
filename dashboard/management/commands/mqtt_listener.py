@@ -175,7 +175,7 @@ class Command(BaseCommand):
                 # 🚀 DATA JSN ASLI DARI ESP32 (100% MURNI TANPA DUMMY / BYPASS)
                 # =========================================================================
                 jsn_val = float(payload.get('jarak_cm', payload.get('jsn', 0.0)))
-                jsn_status_log = f"{jsn_val}cm (ESP32 MURNI)"
+                jsn_status_log = f"{jsn_val}cm"
 
                 # Retry Logic & Save ke Database
                 max_retries = 3
@@ -302,7 +302,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.2 starting (Auto Bypass JSN Error to Dummy Active)..."))
+        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.2 starting"))
         
         while True:
             try:

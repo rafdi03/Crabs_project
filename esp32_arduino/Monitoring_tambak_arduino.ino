@@ -1,3 +1,8 @@
+#define TINY_GSM_MODEM_SIM800 // Tipe modem onboard TTGO T-Call
+
+#include <TinyGsmClient.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <SPI.h>
@@ -5,33 +10,55 @@
 #include <DallasTemperature.h>
 #include <DHT.h>
 
-// ================= 1. ALOKASI PIN LCD ILI9342 =================
-#define TFT_CS        5  
-#define TFT_DC        4  
-#define TFT_RST       2  
-#define TFT_MOSI      23  
+// ================= 1. KONFIGURASI GSM KARTU 3 & MQTT =================
+// APN Kartu 3 (Tri Indonesia)
+const char apn[]      = "3data"; 
+const char gprsUser[] = "";
+const char gprsPass[] = "";
+
+// Konfigurasi MQTT Broker
+const char* MQTT_BROKER = "broker.emqx.io";
+const int   MQTT_PORT   = 1883;
+const char* DEVICE_ID   = "ESP32-001";
+const char* MQTT_TOPIC  = "tambak/ESP32-001/sensor";
+
+// ================= 2. ALOKASI PIN TTGO ONBOARD GSM =================
+#define MODEM_RST            5
+#define MODEM_PWKEY          4
+#define MODEM_POWER_ON       23
+#define MODEM_TX             27
+#define MODEM_RX             26
+
+// Hardware Serial1 untuk Modem GSM TTGO
+#define SerialAT Serial1
+
+// ================= 3. ALOKASI PIN LCD ILI9342 =================
+#define TFT_CS        13  
+#define TFT_DC        12  
+#define TFT_RST       14  
+#define TFT_MOSI      19  
 #define TFT_SCLK      18  
 
-// ================= 2. ALOKASI PIN SENSOR =================
-#define DHT_PIN       15    // Suhu & Kelembaban (DHT22 pada D15)
-#define DS18B20_PIN   13    // Suhu Air (DS18B20 pada D13)
+// ================= 4. ALOKASI PIN SENSOR =================
+#define DS18B20_PIN   15  
+#define DHT_PIN       2   // (Diubah dari GPIO 4 karena GPIO 4 dipakai PWKEY SIM800 TTGO)
 #define DHT_TYPE      DHT22 
-#define TDS_ADC_PIN   34    // TDS (D34 / ADC1)
-#define TRIG_PIN      14    // JSN-SR04T Trig (D14)
-#define ECHO_PIN      27    // JSN-SR04T Echo (D27)
+#define TDS_ADC_PIN   34  
+#define TRIG_PIN      32  // (Diubah dari GPIO 2)
+#define ECHO_PIN      36  
 
-// ================= 3. ALOKASI PIN RELAY =================
+// ================= 5. ALOKASI PIN RELAY =================
 #define RELAY_1       25  
-#define RELAY_2       26  
-#define RELAY_3       32  
+#define RELAY_2       22  
+#define RELAY_3       0   // (Diubah dari GPIO 32)
 #define RELAY_4       33  
-#define RELAY_5       22  
+#define RELAY_5       21  
 
-// DEFINISI WARNA MONOKROM
-#define COLOR_BG          ILI9341_BLACK // Hitam
-#define COLOR_TEXT        ILI9341_WHITE // Putih
-#define COLOR_TEXT_MUTED  0xC618        // Abu-abu Terang
-#define COLOR_BORDER      ILI9341_WHITE // Border Putih
+// DEFINISI WARNA (HIGH-CONTRAST)
+#define COLOR_BG          ILI9341_BLACK 
+#define COLOR_TEXT        ILI9341_WHITE 
+#define COLOR_TEXT_MUTED  0xC618        
+#define COLOR_BORDER      ILI9341_WHITE 
 
 const int ADC_AIR_MURNI  = 3800; 
 const int PPM_AIR_MURNI  = 10;    
@@ -42,27 +69,36 @@ const int PPM_AIR_KERAN  = 150;
 int analogBuffer[SCOUNT];
 int analogBufferIndex = 0;
 
+// Filter Median 5 Data untuk JSN-SR04T (Menghilangkan Noise/Glitch)
+#define JSN_SCOUNT 5
+float jsnBuffer[JSN_SCOUNT];
+int jsnBufferIndex = 0;
+bool jsnBufferInitialized = false;
+
 float lastSuhuAir = -999.0;
 int lastTdsPPM = -999;
 float lastJarakJSN = -999.0;
-float validJarakJSN = -999.0; // Menyimpan sampel valid JSN terakhir
 float lastSuhuUdara = -999.0;
 float lastLembapUdara = -999.0;
-float validSuhuUdara = -999.0;  // Menyimpan sampel valid suhu DHT terakhir
-float validLembapUdara = -999.0; // Menyimpan sampel valid kelembaban DHT terakhir
 float lastDO = -999.0;
 
-// Status Koneksi (Simulasi untuk Tampilan)
-bool isWifiConnected = false;
-bool isBrokerConnected = false;
-int animFrame = 0;
-
-enum SensorState { BACA_SUHU_AIR, BACA_TDS, BACA_JSN, BACA_DHT, BACA_DO };
+// State Machine untuk Sensor Lambat
+enum SensorState { BACA_SUHU_AIR, BACA_TDS, BACA_DHT, BACA_DO };
 SensorState currentState = BACA_SUHU_AIR;
 
 unsigned long lastReadTime = 0;
-// Interval dinaikkan agar 1 siklus penuh (5 sensor) memakan waktu 2 detik (aman untuk DHT22)
 const unsigned long INTERVAL_GANTIAN = 400; 
+
+// Jalur Cepat JSN (Tiap 80ms)
+unsigned long lastJSNTime = 0;
+const unsigned long INTERVAL_JSN = 80;
+
+bool heartBeatState = false;
+
+// Objek GSM & MQTT Client
+TinyGsm modem(SerialAT);
+TinyGsmClient gsmClient(modem);
+PubSubClient mqttClient(gsmClient);
 
 class ILI9342_Full : public Adafruit_ILI9341 {
   public:
@@ -75,6 +111,7 @@ OneWire oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
 DHT dht(DHT_PIN, DHT_TYPE);
 
+// ================= FUNGSI SENSOR =================
 int getMedianNum(int bArray[], int iFilterLen) {
   int bTab[iFilterLen];
   for (byte i = 0; i < iFilterLen; i++) bTab[i] = bArray[i];
@@ -93,6 +130,26 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
+// Median Filter khusus Float (JSN)
+float getMedianFloat(float bArray[], int iFilterLen) {
+  float bTab[iFilterLen];
+  for (byte i = 0; i < iFilterLen; i++) bTab[i] = bArray[i];
+  int i, j;
+  float bTemp;
+  for (j = 0; j < iFilterLen - 1; j++) {
+    for (i = 0; i < iFilterLen - j - 1; i++) {
+      if (bTab[i] > bTab[i + 1]) {
+        bTemp = bTab[i];
+        bTab[i] = bTab[i + 1];
+        bTab[i + 1] = bTemp;
+      }
+    }
+  }
+  if ((iFilterLen & 1) > 0) bTemp = bTab[(iFilterLen - 1) / 2];
+  else bTemp = (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2.0;
+  return bTemp;
+}
+
 int hitungPPM(int adcRaw) {
   long ppm = map(adcRaw, ADC_AIR_MURNI, ADC_AIR_KERAN, PPM_AIR_MURNI, PPM_AIR_KERAN);
   if (ppm < 0) ppm = 0;
@@ -101,24 +158,14 @@ int hitungPPM(int adcRaw) {
 
 float bacaJarakJSN() {
   digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(5);
+  delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(20);
+  delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 40000);
-  
-  // Jika timeout atau gagal baca pulsa
-  if (duration <= 0) return -1.0;
-  
-  float dist = (duration * 0.0343 / 2.0);
-  
-  // Validasi rentang fisik JSN-SR04T (10 cm s/d 450 cm)
-  if (dist < 10.0 || dist > 450.0) {
-    return -1.0; // Nilai tidak valid
-  }
-  
-  return dist;
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  if (duration == 0) return -1.0;
+  return (duration * 0.0343 / 2.0);
 }
 
 float hitungDummyDO(float suhuAir) {
@@ -139,65 +186,95 @@ void setILI9342Rotation() {
   tft.setFullResolution();
 }
 
-// ================= FUNGSI ANIMASI INDIKATOR KONEKSI =================
-
-void updateConnectionStatus() {
-  // Area Status Bar Atas
-  tft.fillRect(0, 0, 320, 22, COLOR_BG);
-  tft.setTextSize(1);
-  
-  // 1. Status WiFi
-  tft.setCursor(6, 7);
-  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
-  tft.print("WIFI: ");
-  
-  if (isWifiConnected) {
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.print("[OK]");
-  } else {
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.print("CONNECTING");
-    // Efek titik animasi ( .  ..  ... )
-    for (int i = 0; i < (animFrame % 4); i++) {
-      tft.print(".");
-    }
-  }
-
-  // 2. Status Broker MQTT
-  tft.setCursor(180, 7);
-  tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
-  tft.print("MQTT: ");
-  
-  if (isBrokerConnected) {
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.print("[CONNECTED]");
-  } else {
-    tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
-    if (!isWifiConnected) {
-      tft.print("WAIT WIFI");
-    } else {
-      tft.setTextColor(COLOR_TEXT, COLOR_BG);
-      tft.print("CONNECTING");
-      for (int i = 0; i < (animFrame % 4); i++) {
-        tft.print(".");
-      }
-    }
-  }
-
-  tft.drawFastHLine(0, 22, 320, COLOR_BORDER);
-  
-  animFrame++;
-  
-  // Simulasi otomatis terhubung setelah beberapa detik (Bisa dihapus jika disambungkan ke fungsi WiFi/MQTT asli)
-  if (animFrame == 6) isWifiConnected = true;
-  if (animFrame == 10) isBrokerConnected = true;
+void toggleHeartbeat() {
+  heartBeatState = !heartBeatState;
+  tft.fillCircle(305, 13, 4, heartBeatState ? COLOR_TEXT : COLOR_BG);
 }
 
-// ================= FUNGSI UPDATE DISPLAY LCD =================
+// ================= POWER ON MODEM TTGO & KONEKSI KARTU 3 =================
+void setupGSMTTGO() {
+  // Power On Modul GSM TTGO T-Call
+  pinMode(MODEM_PWKEY, OUTPUT);
+  pinMode(MODEM_RST, OUTPUT);
+  pinMode(MODEM_POWER_ON, OUTPUT);
 
+  digitalWrite(MODEM_POWER_ON, HIGH);
+  digitalWrite(MODEM_RST, HIGH);
+  
+  // Sequence Power On SIM800
+  digitalWrite(MODEM_PWKEY, LOW);
+  delay(100);
+  digitalWrite(MODEM_PWKEY, HIGH);
+  delay(1000);
+  digitalWrite(MODEM_PWKEY, LOW);
+
+  Serial.println("Memulai komunikasi ke modem TTGO...");
+  SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
+  delay(3000);
+
+  Serial.println("Inisialisasi Modem...");
+  if (!modem.restart()) {
+    Serial.println("Gagal Restart Modem TTGO!");
+    return;
+  }
+
+  Serial.print("Mencari Sinyal Kartu 3...");
+  if (!modem.waitForNetwork()) {
+    Serial.println(" Sinyal tidak ditemukan!");
+    return;
+  }
+  Serial.println(" Sinyal Terhubung!");
+
+  Serial.print("Menghubungkan GPRS APN Tri (3data)...");
+  if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+    Serial.println(" Gagal Koneksi GPRS!");
+    return;
+  }
+  Serial.println(" GPRS Tri Berhasil Terhubung!");
+}
+
+void reconnectMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("Menghubungkan MQTT ke ");
+    Serial.print(MQTT_BROKER);
+    Serial.print("...");
+    if (mqttClient.connect(DEVICE_ID)) {
+      Serial.println(" Terhubung!");
+    } else {
+      Serial.print(" Gagal, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" Coba lagi dalam 3 detik...");
+      delay(3000);
+    }
+  }
+}
+
+void publishSensorData() {
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+
+  StaticJsonDocument<256> doc;
+  doc["device_id"]  = DEVICE_ID;
+  doc["suhu_air"]   = (lastSuhuAir != -999.0 && lastSuhuAir != -127.0) ? lastSuhuAir : 0.0;
+  doc["tds_ppm"]    = (lastTdsPPM != -999) ? lastTdsPPM : 0;
+  doc["jarak_cm"]   = (lastJarakJSN > 0) ? lastJarakJSN : 0.0;
+  doc["suhu_udara"] = (!isnan(lastSuhuUdara)) ? lastSuhuUdara : 0.0;
+  doc["lembap_udr"] = (!isnan(lastLembapUdara)) ? lastLembapUdara : 0.0;
+  doc["do_mg"]      = (lastDO != -999.0) ? lastDO : 0.0;
+
+  char jsonBuffer[256];
+  serializeJson(doc, jsonBuffer);
+
+  mqttClient.publish(MQTT_TOPIC, jsonBuffer);
+  Serial.print("Published via Kartu 3 -> ");
+  Serial.println(jsonBuffer);
+}
+
+// ================= UPDATE DISPLAY LCD =================
 void updateDisplaySuhuAir(float suhu) {
-  tft.fillRect(6, 52, 150, 38, COLOR_BG);
-  tft.setCursor(12, 57);
+  tft.fillRect(6, 50, 150, 38, COLOR_BG);
+  tft.setCursor(12, 55);
   if (suhu == DEVICE_DISCONNECTED_C || suhu == -127.0 || suhu == -999.0) {
     tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
     tft.setTextSize(2);
@@ -212,8 +289,8 @@ void updateDisplaySuhuAir(float suhu) {
 }
 
 void updateDisplayTDS(int ppm) {
-  tft.fillRect(164, 52, 150, 38, COLOR_BG);
-  tft.setCursor(170, 57);
+  tft.fillRect(164, 50, 150, 38, COLOR_BG);
+  tft.setCursor(170, 55);
   if (ppm == -999) {
     tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
     tft.setTextSize(2);
@@ -228,8 +305,8 @@ void updateDisplayTDS(int ppm) {
 }
 
 void updateDisplayJSN(float jarak) {
-  tft.fillRect(6, 118, 150, 38, COLOR_BG);
-  tft.setCursor(12, 123);
+  tft.fillRect(6, 116, 150, 38, COLOR_BG);
+  tft.setCursor(12, 121);
   if (jarak < 0 || jarak == -999.0) {
     tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
     tft.setTextSize(2);
@@ -244,8 +321,8 @@ void updateDisplayJSN(float jarak) {
 }
 
 void updateDisplayDO(float doVal) {
-  tft.fillRect(164, 118, 150, 38, COLOR_BG);
-  tft.setCursor(170, 123);
+  tft.fillRect(164, 116, 150, 38, COLOR_BG);
+  tft.setCursor(170, 121);
   if (doVal == -999.0) {
     tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
     tft.setTextSize(2);
@@ -260,22 +337,22 @@ void updateDisplayDO(float doVal) {
 }
 
 void updateDisplayDHT(float tUdara, float hUdara) {
-  tft.fillRect(6, 182, 308, 50, COLOR_BG);
+  tft.fillRect(6, 180, 308, 52, COLOR_BG);
   
   if (isnan(tUdara) || isnan(hUdara) || tUdara == -999.0) {
-    tft.setCursor(100, 197);
+    tft.setCursor(100, 195);
     tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
     tft.setTextSize(2);
     tft.print("WAITING...");
   } else {
-    tft.setCursor(12, 186);
+    tft.setCursor(12, 184);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Suhu Udara : ");
     tft.print(tUdara, 1);
     tft.print(" C");
 
-    tft.setCursor(12, 210);
+    tft.setCursor(12, 208);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Kelembapan : ");
@@ -288,7 +365,6 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(TDS_ADC_PIN, INPUT);
-  pinMode(DHT_PIN, INPUT_PULLUP);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
@@ -299,10 +375,7 @@ void setup() {
   pinMode(RELAY_5, OUTPUT); digitalWrite(RELAY_5, HIGH);
   
   ds18b20.begin();
-  // Mode Non-Blocking untuk DS18B20 agar tidak ada jeda 750ms
-  ds18b20.setWaitForConversion(false); 
-  ds18b20.requestTemperatures();       
-  
+  ds18b20.setWaitForConversion(false); // Non-blocking agar tidak delay
   dht.begin();
 
   pinMode(TFT_RST, OUTPUT);
@@ -315,56 +388,66 @@ void setup() {
   tft.begin();
   SPI.setFrequency(10000000);
   setILI9342Rotation();
-  
   tft.invertDisplay(true); 
 
   tft.fillScreen(COLOR_BG);
 
-  // --- CARD 1: Suhu Air ---
+  // Layout UI LCD
+  tft.fillRect(0, 0, 320, 26, COLOR_BG);
+  tft.drawFastHLine(0, 26, 320, COLOR_BORDER);
+  tft.setTextColor(COLOR_TEXT, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(15, 5);
+  tft.println("MONITORING TAMBAK");
+
   tft.drawRoundRect(4, 30, 154, 60, 4, COLOR_BORDER);
   tft.setCursor(10, 35);
   tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
   tft.setTextSize(1);
   tft.println("SUHU AIR (DS18B20)");
 
-  // --- CARD 2: TDS ---
   tft.drawRoundRect(162, 30, 154, 60, 4, COLOR_BORDER);
   tft.setCursor(168, 35);
   tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
   tft.setTextSize(1);
   tft.println("TDS (ESTIMASI PPM)");
 
-  // --- CARD 3: Ketinggian Air ---
   tft.drawRoundRect(4, 96, 154, 60, 4, COLOR_BORDER);
   tft.setCursor(10, 101);
   tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
   tft.setTextSize(1);
   tft.println("AIR (JSN-SR04T)");
 
-  // --- CARD 4: DO Air ---
   tft.drawRoundRect(162, 96, 154, 60, 4, COLOR_BORDER);
   tft.setCursor(168, 101);
   tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
   tft.setTextSize(1);
-  tft.println("DO SENSOR (DUMMY)");
+  tft.println("DO SENSOR");
 
-  // --- CARD 5: Udara (DHT22) ---
   tft.drawRoundRect(4, 162, 312, 74, 4, COLOR_BORDER);
   tft.setCursor(10, 167);
   tft.setTextColor(COLOR_TEXT_MUTED, COLOR_BG);
   tft.setTextSize(1);
   tft.println("UDARA (DHT22)");
 
-  // Tampilan Status Awal
-  updateConnectionStatus();
   updateDisplaySuhuAir(lastSuhuAir);
   updateDisplayTDS(lastTdsPPM);
   updateDisplayJSN(lastJarakJSN);
   updateDisplayDO(lastDO);
   updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
+
+  // Inisialisasi GSM TTGO & MQTT
+  setupGSMTTGO();
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
 }
 
 void loop() {
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+  mqttClient.loop();
+
+  // Sampling Analog Buffer TDS
   static unsigned long sampleTime = millis();
   if (millis() - sampleTime > 30U) {
     sampleTime = millis();
@@ -373,20 +456,46 @@ void loop() {
     if (analogBufferIndex == SCOUNT) analogBufferIndex = 0;
   }
 
+  // ================= 1. JALUR CEPAT: PEMBACAAN & MEDIAN FILTER 5 DATA JSN (TIAP 80ms) =================
+  if (millis() - lastJSNTime >= INTERVAL_JSN) {
+    lastJSNTime = millis();
+    float rawJarak = bacaJarakJSN(); // 1. Baca data mentah dari sensor
+    
+    // Hanya proses jika pembacaan valid (> 0 cm / tidak timeout)
+    if (rawJarak > 0) {
+      if (!jsnBufferInitialized) {
+        // Inisialisasi awal: isi 5 slot buffer dengan data valid pertama agar langsung siap
+        for (int i = 0; i < JSN_SCOUNT; i++) {
+          jsnBuffer[i] = rawJarak;
+        }
+        jsnBufferInitialized = true;
+      } else {
+        // Masukkan data mentah baru ke dalam buffer 5 data
+        jsnBuffer[jsnBufferIndex] = rawJarak;
+        jsnBufferIndex = (jsnBufferIndex + 1) % JSN_SCOUNT;
+      }
+      
+      // 2. PROSES MEDIAN FILTER (Mengambil nilai tengah dari 5 data terakhir untuk membuang noise)
+      float jarakSetelahFilter = getMedianFloat(jsnBuffer, JSN_SCOUNT);
+      
+      // 3. Simpan nilai hasil filter
+      lastJarakJSN = jarakSetelahFilter;
+      
+      // 4. TAMPILKAN HASIL MEDIAN FILTER KE LCD (Bukan data mentah)
+      updateDisplayJSN(lastJarakJSN);
+    }
+  }
+
+  // ================= 2. JALUR BIASA: SENSOR LAIN (BERGANTIAN TIAP 400ms) =================
   if (millis() - lastReadTime >= INTERVAL_GANTIAN) {
     lastReadTime = millis();
-    
-    updateConnectionStatus();
+    toggleHeartbeat();
 
     switch (currentState) {
       case BACA_SUHU_AIR:
-        // Ambil suhu dari request sebelumnya
         lastSuhuAir = ds18b20.getTempCByIndex(0);
+        ds18b20.requestTemperatures(); // Request konversi untuk pembacaan berikutnya
         updateDisplaySuhuAir(lastSuhuAir);
-        
-        // Request suhu SEKARANG untuk diambil pada rotasi berikutnya (Asynchronous)
-        ds18b20.requestTemperatures(); 
-        
         currentState = BACA_TDS;
         break;
 
@@ -394,54 +503,24 @@ void loop() {
         int medianADC = getMedianNum(analogBuffer, SCOUNT);
         lastTdsPPM = hitungPPM(medianADC);
         updateDisplayTDS(lastTdsPPM);
-        currentState = BACA_JSN;
-        break;
-      }
-
-      case BACA_JSN: {
-        float curJarak = bacaJarakJSN();
-        if (curJarak > 0.0) {
-          // Sampel baru valid: simpan sebagai sampel valid terakhir
-          validJarakJSN = curJarak;
-          lastJarakJSN = curJarak;
-        } else {
-          // Sampel baru tidak valid: gunakan sampel valid sebelumnya agar tidak muncul WAITING
-          if (validJarakJSN > 0.0) {
-            lastJarakJSN = validJarakJSN;
-          } else {
-            lastJarakJSN = -999.0; // Hanya WAITING jika belum pernah terbaca sejak boot awal
-          }
-        }
-        updateDisplayJSN(lastJarakJSN);
         currentState = BACA_DHT;
         break;
       }
 
-      case BACA_DHT: {
-        float t = dht.readTemperature();
-        float h = dht.readHumidity();
-        if (!isnan(t) && !isnan(h) && t > 0.0 && h > 0.0) {
-          validSuhuUdara = t;
-          validLembapUdara = h;
-          lastSuhuUdara = t;
-          lastLembapUdara = h;
-        } else {
-          if (validSuhuUdara > 0.0) {
-            lastSuhuUdara = validSuhuUdara;
-            lastLembapUdara = validLembapUdara;
-          } else {
-            lastSuhuUdara = -999.0;
-            lastLembapUdara = -999.0;
-          }
-        }
+      case BACA_DHT:
+        lastSuhuUdara = dht.readTemperature();
+        lastLembapUdara = dht.readHumidity();
         updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
         currentState = BACA_DO;
         break;
-      }
 
       case BACA_DO:
         lastDO = hitungDummyDO(lastSuhuAir);
         updateDisplayDO(lastDO);
+        
+        // Kirim data via koneksi GPRS Kartu 3
+        publishSensorData();
+        
         currentState = BACA_SUHU_AIR;
         break;
     }
