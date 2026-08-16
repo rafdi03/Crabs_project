@@ -1293,20 +1293,25 @@
                     }
 
                     // B. Jika pesan adalah update SENSOR
+                    const suhuUdrVal = (msg.suhu_udara !== undefined) ? msg.suhu_udara : msg.suhu_lingkungan;
                     const map = {
-                        'do_': msg.do,
+                        'do_': (msg.do_mg !== undefined) ? msg.do_mg : msg.do,
                         'suhu_air_': msg.suhu_air,
-                        'tds_': msg.tds,
-                        'jsn_': msg.jsn,
-                        'suhu_lingkungan_': msg.suhu_lingkungan
+                        'tds_': (msg.tds_ppm !== undefined) ? msg.tds_ppm : msg.tds,
+                        'jsn_': (msg.jarak_cm !== undefined) ? msg.jarak_cm : msg.jsn,
+                        'suhu_lingkungan_': suhuUdrVal,
+                        'suhu_udara_': suhuUdrVal,
+                        'lembap_': (msg.lembap_udr !== undefined) ? msg.lembap_udr : msg.kelembaban_udara
                     };
                     for (const [prefix, val] of Object.entries(map)) {
-                        const el = document.getElementById(prefix + id);
-                        if (el) {
-                            el.innerText = val;
-                            el.classList.remove('value-update');
-                            void el.offsetWidth;
-                            el.classList.add('value-update');
+                        if (val !== undefined) {
+                            const el = document.getElementById(prefix + id);
+                            if (el) {
+                                el.innerText = val;
+                                el.classList.remove('value-update');
+                                void el.offsetWidth;
+                                el.classList.add('value-update');
+                            }
                         }
                     }
 

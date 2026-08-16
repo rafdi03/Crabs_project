@@ -211,7 +211,7 @@ def download_csv_lokasi(request, lokasi_id):
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="Data_Area_{lokasi.nama_daerah}.csv"'
     writer = csv.writer(response)
-    writer.writerow(['Nama Kolam/Alat', 'Timestamp', 'DO (mg/L)', 'TDS (ppm)', 'Jarak JSN (cm)', 'Suhu Air (C)', 'Suhu Lingkungan (C)'])
+    writer.writerow(['Nama Kolam/Alat', 'Timestamp', 'DO (mg/L)', 'TDS (ppm)', 'Jarak JSN (cm)', 'Suhu Air (C)', 'Suhu Udara (C)', 'Kelembaban Udara (%)'])
     daftar_alat = Alat.objects.filter(lokasi=lokasi, status_aktif=True)
     for alat in daftar_alat:
         for data in alat.data_sensor.all():
@@ -222,7 +222,8 @@ def download_csv_lokasi(request, lokasi_id):
                 data.tds_level,
                 data.jsn_distance,
                 data.suhu_air,
-                data.suhu_lingkungan
+                data.suhu_lingkungan,
+                data.kelembaban_udara
             ])
     return response
 

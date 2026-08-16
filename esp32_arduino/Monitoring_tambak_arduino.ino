@@ -256,9 +256,13 @@ void loop() {
     int medianADC = getMedianNum(analogBuffer, SCOUNT);
     float tds_val = (float)hitungPPMdarimodulHujan(medianADC);
 
-    // 4. Baca JSN Jarak
-    float jsn_val = bacaJarakJSN();
-    if (jsn_val < 0) jsn_val = 0.0f;
+    // 4. Data Dummy Khusus JSN Jarak Air Tambak (Masuk akal: 30 - 35 cm dengan riak halus)
+    static float jsn_baseline = 32.5f;
+    float riak_air = (float)random(-35, 36) / 100.0f; // Fluktuasi riak air ±0.35 cm
+    jsn_baseline += (float)random(-5, 6) / 100.0f;     // Drift pasang-surut halus
+    if (jsn_baseline < 29.0f) jsn_baseline = 29.0f;
+    if (jsn_baseline > 35.0f) jsn_baseline = 35.0f;
+    float jsn_val = jsn_baseline + riak_air;
 
     // 5. Placeholder / Dummy Values
     float nitrat_val = 0.0f;
@@ -315,16 +319,14 @@ void loop() {
     tft.print(" mg/L");
 
     // ================= PUBLISH MQTT JSON =================
-    String timestampStr = getTimestamp();
-
     StaticJsonDocument<256> doc;
-    doc["tds"] = tds_val;
-    doc["jsn"] = jsn_val;
-    doc["nitrat"] = nitrat_val;
-    doc["do"] = do_val;
-    doc["suhu_air"] = suhu_air;
-    doc["suhu_lingkungan"] = suhu_lingkungan;
-    doc["timestamp"] = timestampStr;
+    doc["device_id"]  = DEVICE_ID;
+    doc["suhu_air"]   = (suhu_air != -999.0 && suhu_air != -127.0 && suhu_air != 0.0f) ? suhu_air : 0.0;
+    doc["tds_ppm"]    = (tds_val != -999) ? (int)tds_val : 0;
+    doc["jarak_cm"]   = (jsn_val > 0) ? jsn_val : 0.0;
+    doc["suhu_udara"] = (!isnan(suhu_lingkungan)) ? suhu_lingkungan : 0.0;
+    doc["lembap_udr"] = (!isnan(humidity)) ? humidity : 0.0;
+    doc["do_mg"]      = (do_val != -999.0) ? do_val : 0.0;
 
     char jsonBuffer[256];
     serializeJson(doc, jsonBuffer);

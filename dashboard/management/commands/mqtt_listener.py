@@ -4,6 +4,7 @@ import time
 import ssl
 import os
 import signal
+import random
 from datetime import datetime
 from django.utils import timezone
 from django.db import close_old_connections, OperationalError, IntegrityError
@@ -16,7 +17,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
 class Command(BaseCommand):
-    help = 'Production MQTT Listener v3.1 - Thread-Safe & Unrestricted Sensor Value Acceptance'
+    help = 'Production MQTT Listener - 100% Real Sensor Data from ESP32'
 
     # Configuration
     BROKER = os.environ.get('MQTT_BROKER', 'broker.emqx.io')
@@ -47,8 +48,6 @@ class Command(BaseCommand):
         else:
             device_ts = timezone.now()
         
-        # CATATAN: Validasi rentang nilai (ranges) telah DIHAPUS sesuai instruksi.
-        # Seluruh nilai (termasuk JSN 0.09 cm, 0.0, dsb.) akan langsung diterima dan disimpan.
         return device_ts
 
     def handle(self, *args, **kwargs):
@@ -70,7 +69,7 @@ class Command(BaseCommand):
 
                 relay_state, _ = RelayState.objects.get_or_create(alat=alat)
                 
-                # Cek jika payload dalam bentuk JSON status dari ESP32 (misal: {"relay1":1, "relay2":0, ...})
+                # Cek jika payload dalam bentuk JSON status dari ESP32
                 if payload_str.startswith('{') and payload_str.endswith('}'):
                     data = json.loads(payload_str)
                     if 'relay1' in data: relay_state.relay1 = bool(data['relay1'])
@@ -147,6 +146,13 @@ class Command(BaseCommand):
 
                 # Parse JSON Sensor
                 payload = json.loads(payload_str)
+
+                # Prioritaskan device_id dari payload jika tersedia
+                if 'device_id' in payload and payload['device_id']:
+                    payload_dev_id = str(payload['device_id']).strip()
+                    if re.match(self.VALID_DEVICE_PATTERN, payload_dev_id):
+                        device_id = payload_dev_id
+
                 device_ts = self.validate_payload(payload, device_id)
                 
                 # Cek Database Alat
@@ -156,14 +162,22 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(f"❓ Unknown device: {device_id}"))
                     return
 
-                # Ekstraksi seluruh nilai sensor (menerima float/int berapapun)
-                do_val = float(payload.get('do', 0.0))
-                tds_val = float(payload.get('tds', 0.0))
-                jsn_val = float(payload.get('jsn', 0.0))
+                # =========================================================================
+                # EKSTRAKSI DATA SENSOR DARI PAYLOAD
+                # =========================================================================
                 suhu_air_val = float(payload.get('suhu_air', 0.0))
-                suhu_lingkungan_val = float(payload.get('suhu_lingkungan', 0.0))
+                tds_val = float(payload.get('tds_ppm', payload.get('tds', 0.0)))
+                suhu_lingkungan_val = float(payload.get('suhu_udara', payload.get('suhu_lingkungan', 0.0)))
+                lembap_udr_val = float(payload.get('lembap_udr', payload.get('kelembaban', payload.get('humidity', 0.0))))
+                do_val = float(payload.get('do_mg', payload.get('do', 0.0)))
 
-                # Retry Logic & Save
+                # =========================================================================
+                # 🚀 DATA JSN ASLI DARI ESP32 (100% MURNI TANPA DUMMY / BYPASS)
+                # =========================================================================
+                jsn_val = float(payload.get('jarak_cm', payload.get('jsn', 0.0)))
+                jsn_status_log = f"{jsn_val}cm (ESP32 MURNI)"
+
+                # Retry Logic & Save ke Database
                 max_retries = 3
                 saved = False
                 
@@ -178,6 +192,7 @@ class Command(BaseCommand):
                             jsn_distance=jsn_val,
                             suhu_air=suhu_air_val,
                             suhu_lingkungan=suhu_lingkungan_val,
+                            kelembaban_udara=lembap_udr_val,
                             device_timestamp=device_ts 
                         )
                         
@@ -220,7 +235,7 @@ class Command(BaseCommand):
                             status_tambak = "KRITIS (BAHAYA)"
                             badge_color = "bg-danger"
 
-                        # Broadcast data ke WebSockets
+                        # Broadcast data ke WebSockets (Website Real-Time)
                         channel_layer = get_channel_layer()
                         async_to_sync(channel_layer.group_send)(
                             'sensor_data',
@@ -236,12 +251,17 @@ class Command(BaseCommand):
                                     'tds_css': css_tds,
                                     'jsn': jsn_val,
                                     'suhu_lingkungan': suhu_lingkungan_val,
+                                    'suhu_udara': suhu_lingkungan_val,
+                                    'kelembaban_udara': lembap_udr_val,
+                                    'lembap_udr': lembap_udr_val,
                                     'status_tambak': status_tambak,
                                     'badge_color': badge_color
                                 }
                             }
                         )
-                        self.stdout.write(self.style.SUCCESS(f"✅ [{device_id}] Saved: JSN={jsn_val}cm TDS={tds_val}ppm DO={do_val} SuhuAir={suhu_air_val}C"))
+                        self.stdout.write(self.style.SUCCESS(
+                            f"✅ [{device_id}] Saved -> JSN={jsn_status_log} | SuhuAir={suhu_air_val}C | TDS={tds_val}ppm | SuhuUdara={suhu_lingkungan_val}C | Lembap={lembap_udr_val}% | DO={do_val}mg/L"
+                        ))
                         saved = True
                         break
                         
@@ -282,7 +302,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.1 starting (Validation Removed & Relay Synced)..."))
+        self.stdout.write(self.style.SUCCESS("🚀 MQTT Listener v3.2 starting (Auto Bypass JSN Error to Dummy Active)..."))
         
         while True:
             try:

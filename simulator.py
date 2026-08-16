@@ -20,15 +20,15 @@ print("Tekan CTRL + C untuk menghentikan.\n")
 
 try:
     while True:
-        # Membuat data sensor acak untuk simulasi
+        # Membuat data sensor acak untuk simulasi sesuai payload baru ESP32
         payload = {
-            "do": round(random.uniform(2.5, 6.0), 1),               # mg/L
-            "tds": random.randint(300, 900),                        # ppm
-            "jsn": round(random.uniform(10.0, 50.0), 1),            # cm
-            "suhu_air": round(random.uniform(24.0, 32.0), 1),       # Celcius
-            "suhu_lingkungan": round(random.uniform(28.0, 34.0), 1),# Celcius
-            
-            # Tambahan Waktu (Timestamp) agar lolos validasi MAX_DATA_AGE
+            "device_id": ID_ALAT,
+            "suhu_air": round(random.uniform(25.0, 32.0), 1),        # Celcius
+            "tds_ppm": random.randint(300, 700),                     # ppm
+            "jarak_cm": round(random.uniform(28.0, 36.0), 1),        # cm (Jarak realistis sensor ke air tambak)
+            "suhu_udara": round(random.uniform(27.0, 33.0), 1),      # Celcius
+            "lembap_udr": round(random.uniform(60.0, 85.0), 1),      # %
+            "do_mg": round(random.uniform(4.5, 7.5), 1),             # mg/L
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         

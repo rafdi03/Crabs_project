@@ -38,8 +38,8 @@ static const char *TAG = "TAMBAK_ESP32";
 // ==========================================
 // KONFIGURASI WIFI & MQTT
 // ==========================================
-#define WIFI_SSID         "Rumah Kita"
-#define WIFI_PASS         "EKAGUNAPUTRA03"
+#define WIFI_SSID         "Bayu"
+#define WIFI_PASS         "12345678"
 #define MQTT_BROKER       "mqtt://broker.emqx.io:1883"
 #define DEVICE_ID         "ESP32-001"
 
@@ -381,32 +381,31 @@ static bool baca_dht22_langsung(gpio_num_t pin, float *humidity, float *temperat
 }
 
 // ==========================================
-// BACA JSN-SR04T (LEVEL / JARAK AIR)
+// BACA JSN-SR04T (LEVEL / JARAK AIR) - 100% DATA HARDWARE MURNI
 // ==========================================
-static float bacaJarakJSN(void) {
-    // 1. Pastikan pin Trig LOW sebelum pulsa
+static float ping_jsn_once(void) {
     gpio_set_level(TRIG_PIN, 0);
-    esp_rom_delay_us(10);
+    esp_rom_delay_us(5);
 
-    // 2. Berikan pulsa trigger 20us
+    // Pulsa trigger 20us
     gpio_set_level(TRIG_PIN, 1);
-    esp_rom_delay_us(25);
+    esp_rom_delay_us(20);
     gpio_set_level(TRIG_PIN, 0);
 
-    // 3. Tunggu sinyal Echo naik ke level HIGH (Maksimal 70ms)
+    // Tunggu sinyal Echo naik ke level HIGH (Timeout 60ms)
     int64_t t_wait = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 0) {
-        if ((esp_timer_get_time() - t_wait) > 70000) {
-            return 0.0f; // Timeout / sensor tidak terpasang
+        if ((esp_timer_get_time() - t_wait) > 60000) {
+            return 0.0f; // Sensor tidak terpasang / tidak ada pantulan
         }
         esp_rom_delay_us(1);
     }
 
-    // 4. Ukur durasi sinyal Echo HIGH
+    // Ukur durasi sinyal Echo berada di level HIGH (Timeout 60ms)
     int64_t echo_start = esp_timer_get_time();
     while (gpio_get_level(ECHO_PIN) == 1) {
-        if ((esp_timer_get_time() - echo_start) > 70000) {
-            return 0.0f; // Sinyal Echo macet / timeout
+        if ((esp_timer_get_time() - echo_start) > 60000) {
+            return 0.0f; // Timeout
         }
         esp_rom_delay_us(1);
     }
@@ -415,12 +414,27 @@ static float bacaJarakJSN(void) {
     int64_t duration_us = echo_end - echo_start;
     float distance_cm = ((float)duration_us * 0.0343f) / 2.0f;
 
-    // Rentang valid JSN-SR04T (15 cm s/d 450 cm)
-    if (distance_cm >= 10.0f && distance_cm <= 500.0f) {
-        ESP_LOGI(TAG, "JSN Terbaca: %.2f cm (Durasi: %lld us)", distance_cm, (long long)duration_us);
+    // Rentang fisik valid JSN-SR04T (15 cm s/d 450 cm)
+    if (distance_cm >= 5.0f && distance_cm <= 500.0f) {
         return distance_cm;
     }
     return 0.0f;
+}
+
+static float bacaJarakJSN(void) {
+    // Ping pertama
+    float dist = ping_jsn_once();
+    if (dist > 0.0f) {
+        ESP_LOGI(TAG, "JSN Terbaca Asli: %.2f cm", dist);
+        return dist;
+    }
+    // Jika ping pertama meleset, coba sekali lagi setelah jeda 20ms
+    vTaskDelay(pdMS_TO_TICKS(20));
+    dist = ping_jsn_once();
+    if (dist > 0.0f) {
+        ESP_LOGI(TAG, "JSN Terbaca Asli (Retry): %.2f cm", dist);
+    }
+    return dist;
 }
 
 // ==========================================
@@ -451,7 +465,7 @@ void hardware_init(void) {
 
     gpio_reset_pin(ECHO_PIN);
     gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(ECHO_PIN, GPIO_PULLDOWN_ONLY);
+    gpio_set_pull_mode(ECHO_PIN, GPIO_FLOATING);
 
     // 4. Inisialisasi ADC1 untuk Sensor TDS (GPIO 34 / ADC1_CHANNEL_6)
     adc_oneshot_unit_init_cfg_t adc_cfg = {
@@ -550,22 +564,8 @@ void sensor_task(void *pvParameters) {
             }
         }
 
-        // 3. Baca JSN-SR04T (Jarak Air) dengan Filter Pantulan & Smart Hold
+        // 3. Baca JSN-SR04T (Ketinggian / Jarak Air) - 100% Hardware Murni Langsung
         float jsn_val = bacaJarakJSN();
-        static float last_jsn_val = 0.0f;
-        static int jsn_fail_count = 0;
-
-        if (jsn_val >= 5.0f && jsn_val <= 500.0f) {
-            last_jsn_val = jsn_val;
-            jsn_fail_count = 0;
-        } else {
-            jsn_fail_count++;
-            if (jsn_fail_count < 4 && last_jsn_val > 0.0f) {
-                jsn_val = last_jsn_val;
-            } else {
-                jsn_val = 0.0f;
-            }
-        }
 
         // 4. Baca TDS (GPIO 34) dengan 20-Sample Median Filter & Kompensasi Suhu
         int medianADC = getMedianNum(analogBuffer, SCOUNT);

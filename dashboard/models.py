@@ -35,6 +35,7 @@ class DataSensor(models.Model):
     jsn_distance = models.FloatField(verbose_name="Ketinggian Air JSN (cm)")
     suhu_air = models.FloatField(verbose_name="Suhu Air (°C)")
     suhu_lingkungan = models.FloatField(verbose_name="Suhu Lingkungan (°C)")
+    kelembaban_udara = models.FloatField(default=0.0, verbose_name="Kelembaban Udara (%)")
     device_timestamp = models.DateTimeField(null=True, blank=True)
 
     class Meta:
