@@ -10,11 +10,14 @@
 #include <DallasTemperature.h>
 #include <DHT.h>
 
-// ================= 1. KONFIGURASI GSM KARTU 3 & MQTT =================
-// APN Kartu 3 (Tri Indonesia)
-const char apn[]      = "m2m.telkomsel.com"; 
+// ================= 1. KONFIGURASI GSM KARTU TELKOMSEL & MQTT =================
+// APN Telkomsel Indonesia
+const char apn[]      = "internet"; 
 const char gprsUser[] = "";
 const char gprsPass[] = "";
+
+// IMEI Baru Resmi Terdaftar (Hasil Konfirmasi Sebelumnya)
+const char* REGISTERED_IMEI = "864043050823850";
 
 // Konfigurasi MQTT Broker
 const char* MQTT_BROKER = "broker.emqx.io";
@@ -41,26 +44,18 @@ const char* MQTT_TOPIC  = "tambak/ESP32-001/sensor";
 
 // ================= 4. ALOKASI PIN SENSOR =================
 #define DS18B20_PIN   15  
-#define DHT_PIN       2   // (Diubah dari GPIO 4 karena GPIO 4 dipakai PWKEY SIM800 TTGO)
+#define DHT_PIN       2   // (GPIO 4 dipakai PWKEY SIM800 TTGO)
 #define DHT_TYPE      DHT22 
 #define TDS_ADC_PIN   34  
-#define TRIG_PIN      32  // (Diubah dari GPIO 2)
+#define TRIG_PIN      32  
 #define ECHO_PIN      36  
 
-// ================= 5. ALOKASI PIN RELAY & KONFIGURASI =================
-#define RELAY_1       25  // Relay 1 (D25) - Pompa 1 / Aerator
-#define RELAY_2       22  // Relay 2 (D22) - Pompa 2 / Aerator
-#define RELAY_3       0   // Relay 3 (D0)  - Pemanas / Heater
-#define RELAY_4       33  // Relay 4 (D33) - Feeder Pakan
-#define RELAY_5       21  // Relay 5 (D21) - Solenoid Valve / Cadangan
-
-#define NUM_RELAYS    5
-#define RELAY_ON      LOW   // Active-LOW (0V = Relay ON)
-#define RELAY_OFF     HIGH  // Active-LOW (3.3V = Relay OFF)
-
-const uint8_t RELAY_PINS[NUM_RELAYS] = {RELAY_1, RELAY_2, RELAY_3, RELAY_4, RELAY_5};
-bool relayStates[NUM_RELAYS] = {false, false, false, false, false};
-
+// ================= 5. ALOKASI PIN RELAY =================
+#define RELAY_1       25  
+#define RELAY_2       22  
+#define RELAY_3       0   
+#define RELAY_4       33  
+#define RELAY_5       21  
 
 // DEFINISI WARNA (HIGH-CONTRAST)
 #define COLOR_BG          ILI9341_BLACK 
@@ -77,7 +72,7 @@ const int PPM_AIR_KERAN  = 150;
 int analogBuffer[SCOUNT];
 int analogBufferIndex = 0;
 
-// Filter Median 5 Data untuk JSN-SR04T (Menghilangkan Noise/Glitch)
+// Filter Median 5 Data untuk JSN-SR04T
 #define JSN_SCOUNT 5
 float jsnBuffer[JSN_SCOUNT];
 int jsnBufferIndex = 0;
@@ -90,7 +85,7 @@ float lastSuhuUdara = -999.0;
 float lastLembapUdara = -999.0;
 float lastDO = -999.0;
 
-// State Machine untuk Sensor Lambat
+// State Machine untuk Sensor
 enum SensorState { BACA_SUHU_AIR, BACA_TDS, BACA_DHT, BACA_DO };
 SensorState currentState = BACA_SUHU_AIR;
 
@@ -99,7 +94,7 @@ const unsigned long INTERVAL_GANTIAN = 400;
 
 // Jalur Cepat JSN (Tiap 80ms)
 unsigned long lastJSNTime = 0;
-const unsigned long INTERVAL_JSN = 200;
+const unsigned long INTERVAL_JSN = 80;
 
 bool heartBeatState = false;
 
@@ -138,7 +133,6 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
-// Median Filter khusus Float (JSN)
 float getMedianFloat(float bArray[], int iFilterLen) {
   float bTab[iFilterLen];
   for (byte i = 0; i < iFilterLen; i++) bTab[i] = bArray[i];
@@ -199,9 +193,8 @@ void toggleHeartbeat() {
   tft.fillCircle(305, 13, 4, heartBeatState ? COLOR_TEXT : COLOR_BG);
 }
 
-// ================= POWER ON MODEM TTGO & KONEKSI KARTU 3 =================
+// ================= POWER ON MODEM TTGO & KONEKSI TELKOMSEL =================
 void setupGSMTTGO() {
-  // Power On Modul GSM TTGO T-Call
   pinMode(MODEM_PWKEY, OUTPUT);
   pinMode(MODEM_RST, OUTPUT);
   pinMode(MODEM_POWER_ON, OUTPUT);
@@ -216,9 +209,18 @@ void setupGSMTTGO() {
   delay(1000);
   digitalWrite(MODEM_PWKEY, LOW);
 
-  Serial.println("Memulai komunikasi ke modem TTGO...");
+  Serial.println("Memulai komunikasi serial ke SIM800L...");
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(3000);
+
+  // Inisialisasi Kunci Band & IMEI Telkomsel
+  Serial.println("Memastikan IMEI dan Band Telkomsel...");
+  modem.sendAT("+CBAND=\"ALL_BAND\"");
+  modem.waitResponse(1000);
+
+  String setImeiCmd = "+EGMR=1,7,\"" + String(REGISTERED_IMEI) + "\"";
+  modem.sendAT(setImeiCmd);
+  modem.waitResponse(1000);
 
   Serial.println("Inisialisasi Modem...");
   if (!modem.restart()) {
@@ -226,130 +228,19 @@ void setupGSMTTGO() {
     return;
   }
 
-  Serial.print("Mencari Sinyal Kartu 3...");
-  if (!modem.waitForNetwork()) {
-    Serial.println(" Sinyal tidak ditemukan!");
+  Serial.print("Mencari Sinyal Kartu Telkomsel...");
+  if (!modem.waitForNetwork(60000L)) {
+    Serial.println(" Sinyal Telkomsel tidak ditemukan!");
     return;
   }
   Serial.println(" Sinyal Terhubung!");
 
-  Serial.print("Menghubungkan GPRS APN Tri (3data)...");
+  Serial.print("Menghubungkan GPRS APN Telkomsel (internet)...");
   if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
     Serial.println(" Gagal Koneksi GPRS!");
     return;
   }
-  Serial.println(" GPRS Tri Berhasil Terhubung!");
-}
-
-// ================= FUNGSI KONTROL RELAY =================
-void setRelayState(uint8_t relayNum, bool state) {
-  if (relayNum >= 1 && relayNum <= NUM_RELAYS) {
-    int idx = relayNum - 1;
-    relayStates[idx] = state;
-    digitalWrite(RELAY_PINS[idx], state ? RELAY_ON : RELAY_OFF);
-    Serial.print("[RELAY] Relay ");
-    Serial.print(relayNum);
-    Serial.print(" (GPIO ");
-    Serial.print(RELAY_PINS[idx]);
-    Serial.print(") -> ");
-    Serial.println(state ? "ON (LOW)" : "OFF (HIGH)");
-  } else if (relayNum == 0) { // 0 = Semua Relay Sekaligus
-    for (int i = 0; i < NUM_RELAYS; i++) {
-      relayStates[i] = state;
-      digitalWrite(RELAY_PINS[i], state ? RELAY_ON : RELAY_OFF);
-    }
-    Serial.print("[RELAY] Semua Relay (1-5) -> ");
-    Serial.println(state ? "ON (LOW)" : "OFF (HIGH)");
-  }
-}
-
-// Kirim konfirmasi status relay ke MQTT Broker
-void publishRelayStatus() {
-  if (!mqttClient.connected()) return;
-
-  char statusTopic[64];
-  snprintf(statusTopic, sizeof(statusTopic), "tambak/%s/relay/status", DEVICE_ID);
-
-  char statusPayload[128];
-  snprintf(statusPayload, sizeof(statusPayload),
-    "{\"relay1\":%d,\"relay2\":%d,\"relay3\":%d,\"relay4\":%d,\"relay5\":%d}",
-    relayStates[0] ? 1 : 0,
-    relayStates[1] ? 1 : 0,
-    relayStates[2] ? 1 : 0,
-    relayStates[3] ? 1 : 0,
-    relayStates[4] ? 1 : 0
-  );
-
-  mqttClient.publish(statusTopic, statusPayload);
-  Serial.print("[RELAY] Sync Status -> ");
-  Serial.println(statusPayload);
-}
-
-bool parseStatePayload(const String& payload) {
-  if (payload == "1" || payload == "ON" || payload == "on" || payload == "true" || payload == "TRUE") {
-    return true;
-  }
-  return false;
-}
-
-// Callback MQTT saat menerima pesan dari Website / Broker
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  char payloadStr[length + 1];
-  memcpy(payloadStr, payload, length);
-  payloadStr[length] = '\0';
-  String strPayload = String(payloadStr);
-  strPayload.trim();
-
-  Serial.print("[MQTT Perintah] Topik: ");
-  Serial.print(topic);
-  Serial.print(" | Payload: ");
-  Serial.println(strPayload);
-
-  String strTopic = String(topic);
-
-  // 1. Topic Relay Tunggal: tambak/<DEVICE_ID>/relay/1/set s/d 5/set
-  for (int i = 1; i <= NUM_RELAYS; i++) {
-    String sub = "/relay/" + String(i) + "/set";
-    if (strTopic.endsWith(sub) || strTopic.indexOf(sub) != -1) {
-      bool st = parseStatePayload(strPayload);
-      setRelayState(i, st);
-      publishRelayStatus();
-      return;
-    }
-  }
-
-  // 2. Topic Semua Relay: tambak/<DEVICE_ID>/relay/all/set
-  if (strTopic.endsWith("/relay/all/set") || strTopic.indexOf("/relay/all") != -1) {
-    bool st = parseStatePayload(strPayload);
-    setRelayState(0, st);
-    publishRelayStatus();
-    return;
-  }
-
-  // 3. Payload Format JSON: {"relay": 1, "state": 1} atau {"relay1": 1, ...}
-  if (strPayload.startsWith("{") && strPayload.endsWith("}")) {
-    StaticJsonDocument<128> doc;
-    DeserializationError error = deserializeJson(doc, strPayload);
-    if (!error) {
-      if (doc.containsKey("relay") && doc.containsKey("state")) {
-        int rNum = doc["relay"];
-        bool st = doc["state"].as<bool>() || (doc["state"] == 1);
-        setRelayState(rNum, st);
-        publishRelayStatus();
-        return;
-      }
-      bool changed = false;
-      for (int i = 1; i <= NUM_RELAYS; i++) {
-        String key = "relay" + String(i);
-        if (doc.containsKey(key)) {
-          bool st = doc[key].as<bool>() || (doc[key] == 1);
-          setRelayState(i, st);
-          changed = true;
-        }
-      }
-      if (changed) publishRelayStatus();
-    }
-  }
+  Serial.println(" GPRS Telkomsel Berhasil Terhubung!");
 }
 
 void reconnectMQTT() {
@@ -359,16 +250,6 @@ void reconnectMQTT() {
     Serial.print("...");
     if (mqttClient.connect(DEVICE_ID)) {
       Serial.println(" Terhubung!");
-
-      // Subscribe otomatis ke topik perintah relay untuk device ini
-      char subTopic[64];
-      snprintf(subTopic, sizeof(subTopic), "tambak/%s/relay/#", DEVICE_ID);
-      mqttClient.subscribe(subTopic);
-      Serial.print("[MQTT] Subscribed ke: ");
-      Serial.println(subTopic);
-
-      // Kirim status awal relay ke broker
-      publishRelayStatus();
     } else {
       Serial.print(" Gagal, rc=");
       Serial.print(mqttClient.state());
@@ -396,7 +277,7 @@ void publishSensorData() {
   serializeJson(doc, jsonBuffer);
 
   mqttClient.publish(MQTT_TOPIC, jsonBuffer);
-  Serial.print("Published via Kartu 3 -> ");
+  Serial.print("Published via Telkomsel -> ");
   Serial.println(jsonBuffer);
 }
 
@@ -497,15 +378,14 @@ void setup() {
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
-  // Inisialisasi 5-Channel Relay (Mode: Active-LOW, default OFF)
-  for (int i = 0; i < NUM_RELAYS; i++) {
-    pinMode(RELAY_PINS[i], OUTPUT);
-    digitalWrite(RELAY_PINS[i], RELAY_OFF);
-    relayStates[i] = false;
-  }
+  pinMode(RELAY_1, OUTPUT); digitalWrite(RELAY_1, HIGH);
+  pinMode(RELAY_2, OUTPUT); digitalWrite(RELAY_2, HIGH);
+  pinMode(RELAY_3, OUTPUT); digitalWrite(RELAY_3, HIGH);
+  pinMode(RELAY_4, OUTPUT); digitalWrite(RELAY_4, HIGH);
+  pinMode(RELAY_5, OUTPUT); digitalWrite(RELAY_5, HIGH);
   
   ds18b20.begin();
-  ds18b20.setWaitForConversion(false); // Non-blocking agar tidak delay
+  ds18b20.setWaitForConversion(false);
   dht.begin();
 
   pinMode(TFT_RST, OUTPUT);
@@ -566,10 +446,9 @@ void setup() {
   updateDisplayDO(lastDO);
   updateDisplayDHT(lastSuhuUdara, lastLembapUdara);
 
-  // Inisialisasi GSM TTGO & MQTT
+  // Inisialisasi GSM TTGO Telkomsel & MQTT
   setupGSMTTGO();
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(mqttCallback);
 }
 
 void loop() {
@@ -587,32 +466,24 @@ void loop() {
     if (analogBufferIndex == SCOUNT) analogBufferIndex = 0;
   }
 
-  // ================= 1. JALUR CEPAT: PEMBACAAN & MEDIAN FILTER 5 DATA JSN (TIAP 80ms) =================
+  // ================= 1. JALUR CEPAT: PEMBACAAN JSN (TIAP 80ms) =================
   if (millis() - lastJSNTime >= INTERVAL_JSN) {
     lastJSNTime = millis();
-    float rawJarak = bacaJarakJSN(); // 1. Baca data mentah dari sensor
+    float rawJarak = bacaJarakJSN();
     
-    // Hanya proses jika pembacaan valid (> 0 cm / tidak timeout)
     if (rawJarak > 0) {
       if (!jsnBufferInitialized) {
-        // Inisialisasi awal: isi 5 slot buffer dengan data valid pertama agar langsung siap
         for (int i = 0; i < JSN_SCOUNT; i++) {
           jsnBuffer[i] = rawJarak;
         }
         jsnBufferInitialized = true;
       } else {
-        // Masukkan data mentah baru ke dalam buffer 5 data
         jsnBuffer[jsnBufferIndex] = rawJarak;
         jsnBufferIndex = (jsnBufferIndex + 1) % JSN_SCOUNT;
       }
       
-      // 2. PROSES MEDIAN FILTER (Mengambil nilai tengah dari 5 data terakhir untuk membuang noise)
       float jarakSetelahFilter = getMedianFloat(jsnBuffer, JSN_SCOUNT);
-      
-      // 3. Simpan nilai hasil filter
       lastJarakJSN = jarakSetelahFilter;
-      
-      // 4. TAMPILKAN HASIL MEDIAN FILTER KE LCD (Bukan data mentah)
       updateDisplayJSN(lastJarakJSN);
     }
   }
@@ -625,7 +496,7 @@ void loop() {
     switch (currentState) {
       case BACA_SUHU_AIR:
         lastSuhuAir = ds18b20.getTempCByIndex(0);
-        ds18b20.requestTemperatures(); // Request konversi untuk pembacaan berikutnya
+        ds18b20.requestTemperatures();
         updateDisplaySuhuAir(lastSuhuAir);
         currentState = BACA_TDS;
         break;
@@ -649,7 +520,7 @@ void loop() {
         lastDO = hitungDummyDO(lastSuhuAir);
         updateDisplayDO(lastDO);
         
-        // Kirim data via koneksi GPRS Kartu 3
+        // Kirim data via koneksi GPRS Telkomsel
         publishSensorData();
         
         currentState = BACA_SUHU_AIR;
