@@ -25,7 +25,7 @@ class Command(BaseCommand):
     MQTT_USER = os.environ.get('MQTT_USERNAME', '')
     MQTT_PASS = os.environ.get('MQTT_PASSWORD', '')
     TOPIC_SENSOR = 'tambak/+/sensor'
-    TOPIC_RELAY = 'tambak/+/relay/#'
+    TOPIC_RELAY = 'tambak/+/relay/status'
     RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 1))
     
     VALID_DEVICE_PATTERN = r'^[a-zA-Z0-9_-]+$'
@@ -69,62 +69,38 @@ class Command(BaseCommand):
 
                 relay_state, _ = RelayState.objects.get_or_create(alat=alat)
                 
-                # Cek jika payload dalam bentuk JSON status dari ESP32
-                if payload_str.startswith('{') and payload_str.endswith('}'):
-                    data = json.loads(payload_str)
-                    if 'relay1' in data: relay_state.relay1 = bool(data['relay1'])
-                    if 'relay2' in data: relay_state.relay2 = bool(data['relay2'])
-                    if 'relay3' in data: relay_state.relay3 = bool(data['relay3'])
-                    if 'relay4' in data: relay_state.relay4 = bool(data['relay4'])
-                    if 'relay5' in data: relay_state.relay5 = bool(data['relay5'])
-                    relay_state.save()
-                elif 'set' in topic:
-                    # Parse dari topic misal "tambak/ESP32-001/relay/1/set" atau "tambak/ESP32-001/relay/all/set"
-                    parts = topic.split('/')
-                    st = (payload_str in ['1', 'ON', 'on', 'true', 'TRUE'])
-                    
-                    if 'all' in parts or 'all' in topic:
-                        relay_state.relay1 = st
-                        relay_state.relay2 = st
-                        relay_state.relay3 = st
-                        relay_state.relay4 = st
-                        relay_state.relay5 = st
+                # Parse payload JSON konfirmasi status dari ESP32
+                if (payload_str.startswith('{') and payload_str.endswith('}')) or ('relay1' in payload_str):
+                    try:
+                        data = json.loads(payload_str)
+                        if 'relay1' in data: relay_state.relay1 = bool(data['relay1'])
+                        if 'relay2' in data: relay_state.relay2 = bool(data['relay2'])
+                        if 'relay3' in data: relay_state.relay3 = bool(data['relay3'])
+                        if 'relay4' in data: relay_state.relay4 = bool(data['relay4'])
+                        if 'relay5' in data: relay_state.relay5 = bool(data['relay5'])
                         relay_state.save()
-                    else:
-                        # Cari nomor relay di bagian topik
-                        r_num = None
-                        for p in parts:
-                            if p.isdigit() and 1 <= int(p) <= 5:
-                                r_num = int(p)
-                                break
-                        
-                        if r_num == 1: relay_state.relay1 = st
-                        elif r_num == 2: relay_state.relay2 = st
-                        elif r_num == 3: relay_state.relay3 = st
-                        elif r_num == 4: relay_state.relay4 = st
-                        elif r_num == 5: relay_state.relay5 = st
-                        
-                        if r_num is not None:
-                            relay_state.save()
+                    except Exception:
+                        pass
 
-                # Broadcast relay update ke WebSockets
+                # Broadcast status relay ke WebSockets
                 channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    'sensor_data',
-                    {
-                        'type': 'send_relay_data',
-                        'data': {
-                            'type': 'relay_update',
-                            'id_alat': device_id,
-                            'relay1': relay_state.relay1,
-                            'relay2': relay_state.relay2,
-                            'relay3': relay_state.relay3,
-                            'relay4': relay_state.relay4,
-                            'relay5': relay_state.relay5,
+                if channel_layer:
+                    async_to_sync(channel_layer.group_send)(
+                        'sensor_data',
+                        {
+                            'type': 'send_relay_data',
+                            'data': {
+                                'type': 'relay_update',
+                                'id_alat': device_id,
+                                'relay1': relay_state.relay1,
+                                'relay2': relay_state.relay2,
+                                'relay3': relay_state.relay3,
+                                'relay4': relay_state.relay4,
+                                'relay5': relay_state.relay5,
+                            }
                         }
-                    }
-                )
-                self.stdout.write(self.style.SUCCESS(f"🔌 [{device_id}] Relay State Synced: R1={relay_state.relay1} R2={relay_state.relay2} R3={relay_state.relay3} R4={relay_state.relay4} R5={relay_state.relay5}"))
+                    )
+                self.stdout.write(self.style.SUCCESS(f"🔌 [{device_id}] Relay Confirmed: R1={relay_state.relay1} R2={relay_state.relay2} R3={relay_state.relay3} R4={relay_state.relay4} R5={relay_state.relay5}"))
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"❌ Relay parse error: {e}"))
 
