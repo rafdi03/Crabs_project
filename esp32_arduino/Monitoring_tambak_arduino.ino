@@ -50,12 +50,21 @@ const char* MQTT_TOPIC  = "tambak/ESP32-001/sensor";
 #define TRIG_PIN      32  
 #define ECHO_PIN      36  
 
-// ================= 5. ALOKASI PIN RELAY =================
+// ================= 5. ALOKASI PIN RELAY & KONFIGURASI =================
 #define RELAY_1       25  
 #define RELAY_2       22  
 #define RELAY_3       0   
 #define RELAY_4       33  
 #define RELAY_5       21  
+
+#define NUM_RELAYS    5
+const uint8_t RELAY_PINS[NUM_RELAYS] = { RELAY_1, RELAY_2, RELAY_3, RELAY_4, RELAY_5 };
+
+// Konfigurasi Active-LOW Relay (LOW = ON / Menyala, HIGH = OFF / Mati)
+#define RELAY_ON      LOW
+#define RELAY_OFF     HIGH
+
+bool relayStates[NUM_RELAYS] = { false, false, false, false, false };  
 
 // DEFINISI WARNA (HIGH-CONTRAST)
 #define COLOR_BG          ILI9341_BLACK 
@@ -302,17 +311,17 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String strPayload = String(payloadStr);
   strPayload.trim();
 
-  Serial.print("[MQTT Perintah] Topik: ");
-  Serial.print(topic);
-  Serial.print(" | Payload: ");
-  Serial.println(strPayload);
-
   String strTopic = String(topic);
 
   // 1. FILTER MUTLAK: Abaikan pesan status sendiri untuk mencegah loop echo!
   if (strTopic.endsWith("/status") || strTopic.indexOf("/status") != -1) {
     return;
   }
+
+  Serial.print("[MQTT Perintah] Topik: ");
+  Serial.print(topic);
+  Serial.print(" | Payload: ");
+  Serial.println(strPayload);
 
   // 2. Topic Relay Tunggal: tambak/<DEVICE_ID>/relay/1/set s/d 5/set
   for (int i = 1; i <= NUM_RELAYS; i++) {
@@ -332,31 +341,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     publishRelayStatus();
     return;
   }
-
-  // 4. Payload Format JSON Perintah: {"relay": 1, "state": 1} atau {"relay1": 1, ...}
-  if (strPayload.startsWith("{") && strPayload.endsWith("}")) {
-    StaticJsonDocument<128> doc;
-    DeserializationError error = deserializeJson(doc, strPayload);
-    if (!error) {
-      if (doc.containsKey("relay") && doc.containsKey("state")) {
-        int rNum = doc["relay"];
-        bool st = doc["state"].as<bool>() || (doc["state"] == 1);
-        setRelayState(rNum, st);
-        publishRelayStatus();
-        return;
-      }
-      bool changed = false;
-      for (int i = 1; i <= NUM_RELAYS; i++) {
-        String key = "relay" + String(i);
-        if (doc.containsKey(key)) {
-          bool st = doc[key].as<bool>() || (doc[key] == 1);
-          setRelayState(i, st);
-          changed = true;
-        }
-      }
-      if (changed) publishRelayStatus();
-    }
-  }
 }
 
 void reconnectMQTT() {
@@ -367,7 +351,7 @@ void reconnectMQTT() {
     if (mqttClient.connect(DEVICE_ID)) {
       Serial.println(" Terhubung!");
 
-      // Subscribe khusus ke topik perintah set relay device ini
+      // Subscribe KHUSUS ke topik perintah set relay device ini (BUKAN wildcard #!)
       char subTopicSingle[64];
       snprintf(subTopicSingle, sizeof(subTopicSingle), "tambak/%s/relay/+/set", DEVICE_ID);
       mqttClient.subscribe(subTopicSingle);
@@ -425,7 +409,7 @@ void updateDisplaySuhuAir(float suhu) {
   } else {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(3);
-    tft.print(suhu, 2);
+    tft.print(suhu, 1);
     tft.setTextSize(2);
     tft.print(" C");
   }
@@ -457,7 +441,7 @@ void updateDisplayJSN(float jarak) {
   } else {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(3);
-    tft.print(jarak, 2);
+    tft.print(jarak, 1);
     tft.setTextSize(2);
     tft.print(" cm");
   }
@@ -492,14 +476,14 @@ void updateDisplayDHT(float tUdara, float hUdara) {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Suhu Udara : ");
-    tft.print(tUdara, 2);
+    tft.print(tUdara, 1);
     tft.print(" C");
 
     tft.setCursor(12, 208);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.setTextSize(2);
     tft.print("Kelembapan : ");
-    tft.print(hUdara, 2);
+    tft.print(hUdara, 1);
     tft.print(" %");
   }
 }
@@ -511,11 +495,11 @@ void setup() {
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
-  pinMode(RELAY_1, OUTPUT); digitalWrite(RELAY_1, HIGH);
-  pinMode(RELAY_2, OUTPUT); digitalWrite(RELAY_2, HIGH);
-  pinMode(RELAY_3, OUTPUT); digitalWrite(RELAY_3, HIGH);
-  pinMode(RELAY_4, OUTPUT); digitalWrite(RELAY_4, HIGH);
-  pinMode(RELAY_5, OUTPUT); digitalWrite(RELAY_5, HIGH);
+  // Inisialisasi Pin Relay (Semua OFF saat pertama kali boot)
+  for (int i = 0; i < NUM_RELAYS; i++) {
+    pinMode(RELAY_PINS[i], OUTPUT);
+    digitalWrite(RELAY_PINS[i], RELAY_OFF);
+  }
   
   ds18b20.begin();
   ds18b20.setWaitForConversion(false);
