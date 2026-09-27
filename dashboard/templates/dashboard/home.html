@@ -157,12 +157,9 @@
             <a class="navbar-brand" href="#">
                 <i class=""></i> 🌊 Crabs aquasense
             </a>
-            <form action="{% url 'logout' %}" method="post" class="d-flex">
-                {% csrf_token %}
-                <button class="btn btn-logout btn-sm" type="submit">
-                    <i class="bi bi-box-arrow-right me-1"></i> Logout
-                </button>
-            </form>
+            <a class="btn btn-logout btn-sm" href="#lokasi">
+                <i class="bi bi-box-arrow-in-right me-1"></i> Masuk Dashboard
+            </a>
         </div>
     </nav>
 
@@ -175,7 +172,7 @@
         </div>
 
         <!-- ===== GRID LOKASI ===== -->
-        <div class="row">
+        <div class="row" id="lokasi">
             {% for lokasi in daftar_lokasi %}
                 <div class="col-md-4 mb-4">
                     <div class="card-lokasi">

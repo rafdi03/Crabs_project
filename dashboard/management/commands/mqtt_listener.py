@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.db import close_old_connections, OperationalError, IntegrityError
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
-from dashboard.models import Alat, DataSensor, RelayState
+from dashboard.models import Alat, DataSensor, RelayState, Firmware
 import paho.mqtt.client as mqtt
 import certifi 
 from channels.layers import get_channel_layer
@@ -25,6 +25,7 @@ class Command(BaseCommand):
     MQTT_USER = os.environ.get('MQTT_USERNAME', '')
     MQTT_PASS = os.environ.get('MQTT_PASSWORD', '')
     TOPIC_SENSOR = 'tambak/+/sensor'
+    TOPIC_OTA_STATUS = 'tambak/+/ota/status'
     RATE_LIMIT_SECONDS = int(os.environ.get('RATE_LIMIT', 1))
     
     VALID_DEVICE_PATTERN = r'^[a-zA-Z0-9_-]+$'
@@ -54,7 +55,9 @@ class Command(BaseCommand):
             if rc == 0:
                 self.stdout.write(self.style.SUCCESS(f"🔒 Connected to {self.BROKER}:{self.PORT}"))
                 client.subscribe(self.TOPIC_SENSOR, 0)
+                client.subscribe(self.TOPIC_OTA_STATUS, 1)
                 self.stdout.write(self.style.SUCCESS(f"📡 Subscribed to {self.TOPIC_SENSOR}"))
+                self.stdout.write(self.style.SUCCESS(f"📡 Subscribed to {self.TOPIC_OTA_STATUS}"))
             else:
                 self.stdout.write(self.style.ERROR(f"❌ Connection failed (rc={rc})"))
 
@@ -117,6 +120,10 @@ class Command(BaseCommand):
                     return
 
                 payload_str = msg.payload.decode('utf-8')
+                
+                if topic.endswith('/ota/status'):
+                    self.handle_ota_status(device_id, payload_str)
+                    return
 
                 # Jika pesan adalah topik Relay, abaikan agar tidak mengganggu listener
                 if '/relay' in topic:
@@ -304,3 +311,55 @@ class Command(BaseCommand):
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"Connection error: {e}"))
                 time.sleep(5)
+                
+    def handle_ota_status(self, device_id, payload_str):
+        """Terima update progress OTA dari ESP32 lalu simpan dan broadcast."""
+        try:
+            close_old_connections()
+            data = json.loads(payload_str)
+            state = str(data.get('state', '')).strip().lower()
+            allowed_states = {choice[0] for choice in Firmware.STATUS_CHOICES}
+            if state not in allowed_states:
+                self.stdout.write(self.style.WARNING(f"⚠️ OTA state tidak dikenal dari {device_id}: {state}"))
+                return
+
+            progress = max(0, min(100, int(data.get('progress', 0))))
+            msg = str(data.get('msg', ''))[:128]
+            self.stdout.write(self.style.SUCCESS(f"📦 [{device_id}] OTA {state} {progress}% {msg}"))
+
+            fw = Firmware.objects.filter(
+                device_id=device_id,
+                status__in=['queued', 'started', 'downloading', 'verifying'],
+            ).order_by('-triggered_at').first()
+            firmware_id = fw.id if fw else None
+            version = fw.version if fw else None
+            if fw:
+                fw.status = state
+                fw.progress = progress
+                if state == 'error':
+                    fw.last_error = msg or 'OTA gagal'
+                if state in {'success', 'error'}:
+                    fw.completed_at = timezone.now()
+                fw.save()
+
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    'sensor_data',
+                    {
+                        'type': 'send_ota_status',
+                        'data': {
+                            'type': 'ota_status',
+                            'firmware_id': firmware_id,
+                            'id_alat': device_id,
+                            'version': version,
+                            'state': state,
+                            'progress': progress,
+                            'msg': msg,
+                        },
+                    },
+                )
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            self.stdout.write(self.style.ERROR(f"❌ OTA status invalid: {e}"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"💥 OTA status error: {e}"))

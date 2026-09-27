@@ -1,12 +1,9 @@
-from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth import login, authenticate, logout
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
-from django.contrib.auth.decorators import login_required
+from django.shortcuts import render, get_object_or_404
 from django.db.models import Avg
 from django.utils import timezone
 from datetime import timedelta, datetime
 from django.http import HttpResponse, JsonResponse
-from .models import Lokasi, Alat, DataSensor, RelayState
+from .models import Lokasi, Alat, DataSensor, RelayState, Firmware
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncDate, TruncMonth, TruncHour
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -15,47 +12,18 @@ import csv
 import json
 import os
 from collections import defaultdict
+from urllib.parse import urlparse
 
 MQTT_BROKER = os.environ.get('MQTT_BROKER', 'broker.emqx.io')
 MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
 
-# 1. Login
-def login_view(request):
-    if request.method == 'POST':
-        form = AuthenticationForm(data=request.POST)
-        if form.is_valid():
-            user = form.get_user()
-            login(request, user)
-            return redirect('halaman_utama')
-    else:
-        form = AuthenticationForm()
-    return render(request, 'dashboard/login.html', {'form': form})
 
-# 2. Registrasi
-def register_view(request):
-    if request.method == 'POST':
-        form = UserCreationForm(request.POST)
-        if form.is_valid():
-            user = form.save()
-            login(request, user)
-            return redirect('halaman_utama')
-    else:
-        form = UserCreationForm()
-    return render(request, 'dashboard/register.html', {'form': form})
-
-# 3. Logout
-def logout_view(request):
-    logout(request)
-    return redirect('login')
-
-# 4. Halaman Utama
-@login_required(login_url='login')
+# 1. Halaman Utama — dashboard bersifat terbuka tanpa login.
 def halaman_utama(request):
     semua_lokasi = Lokasi.objects.all()
     return render(request, 'dashboard/home.html', {'daftar_lokasi': semua_lokasi})
 
-# 5. Detail Lokasi (Dengan Inisialisasi RelayState per Alat)
-@login_required(login_url='login')
+# 2. Detail Lokasi (Dengan Inisialisasi RelayState per Alat)
 def detail_lokasi(request, lokasi_id):
     lokasi_terpilih = get_object_or_404(Lokasi, id=lokasi_id)
     daftar_alat = Alat.objects.filter(lokasi=lokasi_terpilih, status_aktif=True)
@@ -80,6 +48,7 @@ def detail_lokasi(request, lokasi_id):
 
         # Pastikan status relay tersedia
         relay_state, _ = RelayState.objects.get_or_create(alat=alat)
+        firmware_list = Firmware.objects.filter(device_id=alat.id_alat)[:10]
 
         alat_data_list.append({
             'alat': alat,
@@ -87,6 +56,7 @@ def detail_lokasi(request, lokasi_id):
             'chart_data': chart_data,
             'tabel_riwayat': semua_history,
             'relay_state': relay_state,
+            'firmware_list': firmware_list,
         })
 
     context = {
@@ -96,7 +66,6 @@ def detail_lokasi(request, lokasi_id):
     return render(request, 'dashboard/detail_lokasi.html', context)
 
 # 6. API Kontrol Relay (Web -> MQTT & WebSockets)
-@login_required(login_url='login')
 def relay_control(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Metode request harus POST'}, status=405)
@@ -191,7 +160,6 @@ def relay_control(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 # 7. API Get Relay Status
-@login_required(login_url='login')
 def get_relay_status(request, alat_id):
     try:
         alat = get_object_or_404(Alat, id_alat=alat_id)
@@ -209,7 +177,6 @@ def get_relay_status(request, alat_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 # 8. API Get Latest Sensor Data (Smart Fallback Polling jika WebSocket bermasalah)
-@login_required(login_url='login')
 def get_sensor_terbaru(request, alat_id):
     try:
         alat = get_object_or_404(Alat, id_alat=alat_id, status_aktif=True)
@@ -283,7 +250,6 @@ def get_sensor_terbaru(request, alat_id):
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 # 8. Download CSV (Format .2f untuk semua data numerik sensor)
-@login_required(login_url='login')
 def download_csv_lokasi(request, lokasi_id):
     lokasi = get_object_or_404(Lokasi, id=lokasi_id)
     response = HttpResponse(content_type='text/csv')
@@ -306,7 +272,6 @@ def download_csv_lokasi(request, lokasi_id):
     return response
 
 # 9. API chart-bulanan
-@login_required(login_url='login')
 def chart_bulanan(request, alat_id):
     try:
         alat = Alat.objects.get(id_alat=alat_id, status_aktif=True)
@@ -356,7 +321,6 @@ def chart_bulanan(request, alat_id):
     return JsonResponse(result)
 
 # 10. API chart-data (Support 10 Menit & Anti-Lag)
-@login_required
 def chart_data(request, alat_id):
     try:
         alat = Alat.objects.get(id_alat=alat_id, status_aktif=True)
@@ -484,3 +448,200 @@ def chart_data(request, alat_id):
         'jsn': [d['jsn_distance'] for d in aggregated],
     }
     return JsonResponse(result)
+
+def firmware_upload(request):
+    """Upload file .bin firmware baru."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        device_id = request.POST.get('device_id', '').strip()
+        version = request.POST.get('version', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        file = request.FILES.get('file')
+
+        if not device_id:
+            return JsonResponse({'error': 'Device ID wajib diisi'}, status=400)
+        if not version:
+            return JsonResponse({'error': 'Version wajib diisi'}, status=400)
+        if not file:
+            return JsonResponse({'error': 'File firmware wajib diupload'}, status=400)
+        if not file.name.lower().endswith('.bin'):
+            return JsonResponse({'error': 'File harus berformat .bin'}, status=400)
+        if file.size > 3 * 1024 * 1024:
+            return JsonResponse({'error': 'File terlalu besar (max 3MB)'}, status=400)
+
+        try:
+            Alat.objects.get(id_alat=device_id, status_aktif=True)
+        except Alat.DoesNotExist:
+            return JsonResponse({'error': f'Device {device_id} tidak terdaftar atau tidak aktif'}, status=404)
+
+        fw = Firmware.objects.create(
+            device_id=device_id,
+            version=version,
+            file=file,
+            notes=notes,
+        )
+
+        return JsonResponse({
+            'success': True,
+            'id': fw.id,
+            'device_id': fw.device_id,
+            'version': fw.version,
+            'file_size_kb': fw.file_size_kb(),
+            'file_url': fw.file.url,
+        })
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def firmware_list(request, device_id):
+    """List semua firmware untuk device tertentu."""
+    try:
+        firmwares = Firmware.objects.filter(device_id=device_id)[:20]
+        data = []
+        for fw in firmwares:
+            data.append({
+                'id': fw.id,
+                'version': fw.version,
+                'file_size_kb': fw.file_size_kb(),
+                'status': fw.status,
+                'progress': fw.progress,
+                'last_error': fw.last_error,
+                'uploaded_at': timezone.localtime(fw.uploaded_at).strftime('%d %b %Y, %H:%M'),
+                'triggered_at': timezone.localtime(fw.triggered_at).strftime('%d %b %Y, %H:%M') if fw.triggered_at else None,
+                'notes': fw.notes or '',
+            })
+        return JsonResponse({'success': True, 'firmwares': data})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+
+def firmware_trigger_ota(request, firmware_id):
+    """Publish URL firmware ke MQTT → ESP32 akan download & flash."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    try:
+        fw = Firmware.objects.get(id=firmware_id)
+    except Firmware.DoesNotExist:
+        return JsonResponse({'error': 'Firmware tidak ditemukan'}, status=404)
+
+    try:
+        alat = Alat.objects.get(id_alat=fw.device_id, status_aktif=True)
+    except Alat.DoesNotExist:
+        return JsonResponse({'error': f'Alat {fw.device_id} tidak aktif'}, status=404)
+
+    # Build URL publik firmware
+    from django.conf import settings
+    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8000').rstrip('/')
+    parsed_site_url = urlparse(site_url)
+    if parsed_site_url.scheme not in {'http', 'https'} or not parsed_site_url.netloc:
+        return JsonResponse({'error': 'SITE_URL harus berupa URL http:// atau https:// yang valid.'}, status=400)
+    if parsed_site_url.hostname in {'localhost', '127.0.0.1', '::1'}:
+        return JsonResponse({
+            'error': 'SITE_URL masih localhost. Atur SITE_URL ke alamat publik/tunnel atau IP LAN yang dapat dijangkau ESP32.'
+        }, status=400)
+    firmware_url = f"{site_url}{fw.file.url}"
+
+    topic = f"tambak/{fw.device_id}/ota/url"
+    fw.status = 'queued'
+    fw.progress = 0
+    fw.triggered_at = timezone.now()
+    fw.completed_at = None
+    fw.last_error = None
+    fw.save(update_fields=['status', 'progress', 'triggered_at', 'completed_at', 'last_error'])
+
+    try:
+        auth = None
+        mqtt_username = os.environ.get('MQTT_USERNAME', '')
+        mqtt_password = os.environ.get('MQTT_PASSWORD', '')
+        if mqtt_username and mqtt_password:
+            auth = {'username': mqtt_username, 'password': mqtt_password}
+        tls = {} if MQTT_PORT == 8883 else None
+        publish.single(
+            topic,
+            firmware_url,
+            hostname=MQTT_BROKER,
+            port=MQTT_PORT,
+            qos=1,
+            keepalive=15,
+            auth=auth,
+            tls=tls,
+        )
+        print(f"📡 [OTA] Published to {topic}: {firmware_url}")
+    except Exception as e:
+        fw.status = 'error'
+        fw.last_error = str(e)[:128]
+        fw.completed_at = timezone.now()
+        fw.save(update_fields=['status', 'last_error', 'completed_at'])
+        return JsonResponse({'error': f'MQTT publish gagal: {e}'}, status=500)
+
+    # Broadcast ke WebSocket langsung
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                'sensor_data',
+                {
+                    'type': 'send_ota_status',
+                    'data': {
+                        'type': 'ota_status',
+                        'firmware_id': fw.id,
+                        'id_alat': fw.device_id,
+                        'version': fw.version,
+                        'state': 'queued',
+                        'progress': 0,
+                        'msg': 'URL dikirim ke ESP32...',
+                    }
+                }
+            )
+    except Exception:
+        pass
+
+    return JsonResponse({
+        'success': True,
+        'firmware_id': fw.id,
+        'topic': topic,
+        'firmware_url': firmware_url,
+        'version': fw.version,
+    })
+
+
+def firmware_delete(request, firmware_id):
+    """Hapus file firmware."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    try:
+        fw = Firmware.objects.get(id=firmware_id)
+        fw.file.delete(save=False)
+        fw.delete()
+        return JsonResponse({'success': True})
+    except Firmware.DoesNotExist:
+        return JsonResponse({'error': 'Tidak ditemukan'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def firmware_status(request, device_id):
+    """Polling status OTA terbaru (fallback jika WebSocket tidak jalan)."""
+    try:
+        fw = Firmware.objects.filter(
+            device_id=device_id
+        ).exclude(status='idle').order_by('-triggered_at').first()
+
+        if not fw:
+            return JsonResponse({'success': True, 'has_ota': False})
+
+        return JsonResponse({
+            'success': True,
+            'has_ota': True,
+            'firmware_id': fw.id,
+            'version': fw.version,
+            'status': fw.status,
+            'progress': fw.progress,
+            'last_error': fw.last_error,
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)}, status=500)

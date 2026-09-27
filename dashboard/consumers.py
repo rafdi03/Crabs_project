@@ -36,3 +36,11 @@ class SensorConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps(data))
         except Exception as e:
             logger.debug(f"Relay send failed: {e}")
+            
+    async def send_ota_status(self, event):
+        """Broadcast OTA progress ke browser."""
+        try:
+            data = event.get('data', {})
+            await self.send(text_data=json.dumps(data))
+        except Exception as e:
+            logger.debug(f"OTA send failed: {e}")

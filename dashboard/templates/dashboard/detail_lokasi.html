@@ -655,6 +655,11 @@
                             <i class="bi bi-calendar3"></i> Riwayat
                         </button>
                     </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="firmware-tab-{{ item.alat.id_alat }}" data-bs-toggle="tab" data-bs-target="#firmware-{{ item.alat.id_alat }}" type="button" role="tab">
+                            <i class="bi bi-cpu"></i> Firmware OTA
+                        </button>
+                    </li>
                 </ul>
 
                 <div class="tab-content" id="chartTabContent_{{ item.alat.id_alat }}">
@@ -920,6 +925,67 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="firmware-{{ item.alat.id_alat }}" role="tabpanel">
+                        <section class="relay-section">
+                            <div class="relay-header">
+                                <div>
+                                    <h5 class="relay-header-title"><i class="bi bi-cpu"></i> Firmware OTA</h5>
+                                    <p class="relay-header-subtitle">Firmware dikirim lewat MQTT; ESP32 mengambil file dari URL yang dapat dijangkau perangkat.</p>
+                                </div>
+                            </div>
+                            <div class="alert alert-warning small">
+                                Pastikan ESP32 sudah memiliki handler OTA. `SITE_URL` harus berupa alamat publik/tunnel atau IP LAN yang dapat dijangkau ESP32.
+                            </div>
+                            <div class="border rounded p-3 mb-3">
+                                {% csrf_token %}
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-3">
+                                        <label class="form-label" for="ota_version_{{ item.alat.id_alat }}">Versi</label>
+                                        <input class="form-control form-control-sm" id="ota_version_{{ item.alat.id_alat }}" maxlength="32" placeholder="v1.0.1">
+                                    </div>
+                                    <div class="col-md-5">
+                                        <label class="form-label" for="ota_file_{{ item.alat.id_alat }}">Firmware (.bin, maks. 3 MB)</label>
+                                        <input class="form-control form-control-sm" type="file" id="ota_file_{{ item.alat.id_alat }}" accept=".bin">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label" for="ota_notes_{{ item.alat.id_alat }}">Catatan</label>
+                                        <input class="form-control form-control-sm" id="ota_notes_{{ item.alat.id_alat }}" maxlength="500" placeholder="Opsional">
+                                    </div>
+                                    <div class="col-12">
+                                        <button class="btn btn-primary btn-sm" id="ota_upload_btn_{{ item.alat.id_alat }}" type="button" onclick="uploadFirmware('{{ item.alat.id_alat|escapejs }}')">
+                                            <i class="bi bi-cloud-upload me-1"></i> Upload firmware
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="border rounded p-3 mb-3 d-none" id="ota_live_{{ item.alat.id_alat }}">
+                                <div class="fw-semibold mb-2">Status OTA: <span id="ota_live_state_{{ item.alat.id_alat }}">-</span></div>
+                                <div class="progress" role="progressbar" aria-label="Progress OTA">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="ota_live_prg_{{ item.alat.id_alat }}" style="width: 0%">0%</div>
+                                </div>
+                                <div class="small text-muted mt-2" id="ota_live_msg_{{ item.alat.id_alat }}"></div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table class="table table-hover align-middle">
+                                    <thead><tr><th>Versi</th><th>Ukuran</th><th>Status</th><th>Diunggah</th><th>Aksi</th></tr></thead>
+                                    <tbody id="ota_list_{{ item.alat.id_alat }}">
+                                        {% for fw in item.firmware_list %}
+                                        <tr>
+                                            <td>{{ fw.version }}</td>
+                                            <td>{{ fw.file_size_kb }} KB</td>
+                                            <td>{{ fw.get_status_display }}</td>
+                                            <td>{{ fw.uploaded_at|date:"d M Y, H:i" }}</td>
+                                            <td><button type="button" class="btn btn-sm btn-warning" onclick="triggerOTA({{ fw.id }}, '{{ item.alat.id_alat|escapejs }}')">Kirim OTA</button> <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteFirmware({{ fw.id }}, '{{ item.alat.id_alat|escapejs }}')" aria-label="Hapus firmware {{ fw.version }}"><i class="bi bi-trash"></i></button></td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="5" class="text-muted text-center py-3">Belum ada firmware</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
                 </div>
 
@@ -1531,6 +1597,10 @@
                 socket.onmessage = function(e) {
                     try {
                         const msg = JSON.parse(e.data);
+                        if (msg.type === 'ota_status') {
+                            applyOTAStatus(msg);
+                            return;
+                        }
                         if (msg.type === 'relay_update') {
                             updateRelayUI(msg.id_alat, {
                                 relay1: msg.relay1,
@@ -1564,7 +1634,199 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             initRealtimeSync();
+            initOTATabs();
+            pollOTAStatus();
+            setInterval(pollOTAStatus, 3000);
         });
+
+        // =========================================================
+// 🚀 OTA FIRMWARE MANAGEMENT
+// =========================================================
+
+function getCSRFTokenGlobal() {
+    const el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+}
+
+// ==== 1. Upload Firmware ====
+function uploadFirmware(deviceId) {
+    const versionEl = document.getElementById(`ota_version_${deviceId}`);
+    const fileEl = document.getElementById(`ota_file_${deviceId}`);
+    const notesEl = document.getElementById(`ota_notes_${deviceId}`);
+    const btn = document.getElementById(`ota_upload_btn_${deviceId}`);
+
+    const version = versionEl.value.trim();
+    const file = fileEl.files[0];
+    const notes = notesEl.value.trim();
+
+    if (!version) { alert('Versi wajib diisi'); return; }
+    if (!file) { alert('Pilih file .bin'); return; }
+    if (!file.name.endsWith('.bin')) { alert('File harus .bin'); return; }
+    if (file.size > 3 * 1024 * 1024) { alert('File terlalu besar (max 3MB)'); return; }
+
+    const formData = new FormData();
+    formData.append('device_id', deviceId);
+    formData.append('version', version);
+    formData.append('notes', notes);
+    formData.append('file', file);
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Uploading...';
+
+    fetch('/api/firmware/upload/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFTokenGlobal() },
+        body: formData,
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            versionEl.value = '';
+            fileEl.value = '';
+            notesEl.value = '';
+            alert(`✅ Firmware ${data.version} berhasil diupload (${data.file_size_kb} KB)`);
+            loadFirmwareList(deviceId);
+        } else {
+            alert(`❌ ${data.error}`);
+        }
+    })
+    .catch(err => alert(`❌ Error: ${err}`))
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i> Upload Firmware';
+    });
+}
+
+// ==== 2. Load daftar firmware ====
+function loadFirmwareList(deviceId) {
+    const tbody = document.getElementById(`ota_list_${deviceId}`);
+    if (!tbody) return;
+
+    fetch(`/api/firmware/list/${deviceId}/`)
+        .then(res => res.json())
+        .then(data => {
+            tbody.innerHTML = '';
+            if (!data.success || data.firmwares.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Belum ada firmware</td></tr>';
+                return;
+            }
+            data.firmwares.forEach(fw => {
+                const statusClass = {
+                    'idle': 'bg-secondary',
+                    'queued': 'bg-info',
+                    'started': 'bg-info',
+                    'downloading': 'bg-warning text-dark',
+                    'verifying': 'bg-warning text-dark',
+                    'success': 'bg-success',
+                    'error': 'bg-danger',
+                }[fw.status] || 'bg-secondary';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${fw.version}</strong></td>
+                    <td>${fw.file_size_kb} KB</td>
+                    <td><span class="badge ${statusClass}">${fw.status}</span></td>
+                    <td class="small text-muted">${fw.uploaded_at}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning"
+                                onclick="triggerOTA(${fw.id}, '${deviceId}')"
+                                title="Kirim ke ESP32">
+                            <i class="bi bi-send"></i> OTA
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger"
+                                onclick="deleteFirmware(${fw.id}, '${deviceId}')"
+                                title="Hapus">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        })
+        .catch(err => {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">Error: ${err}</td></tr>`;
+        });
+}
+
+// ==== 3. Trigger OTA ====
+function triggerOTA(firmwareId, deviceId) {
+    if (!confirm(`Kirim firmware ID ${firmwareId} ke ${deviceId}?\n\nESP32 akan download, flash, dan reboot otomatis.`)) return;
+
+    fetch(`/api/firmware/trigger/${firmwareId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFTokenGlobal() },
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            // Tampilkan live status
+            const live = document.getElementById(`ota_live_${deviceId}`);
+            if (live) live.classList.remove('d-none');
+            console.log('OTA triggered:', data);
+        } else {
+            alert(`❌ ${data.error}`);
+        }
+    })
+    .catch(err => alert(`❌ Error: ${err}`));
+}
+
+// ==== 4. Delete Firmware ====
+function deleteFirmware(firmwareId, deviceId) {
+    if (!confirm('Hapus firmware ini?')) return;
+    fetch(`/api/firmware/delete/${firmwareId}/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFTokenGlobal() },
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            loadFirmwareList(deviceId);
+        } else {
+            alert(`❌ ${data.error}`);
+        }
+    })
+    .catch(err => alert(`❌ Error: ${err}`));
+}
+
+// ==== 5. Handle OTA status dari WebSocket ====
+function applyOTAStatus(msg) {
+    const deviceId = msg.id_alat;
+    const live = document.getElementById(`ota_live_${deviceId}`);
+    if (!live) return;
+
+    live.classList.remove('d-none');
+
+    const stateEl = document.getElementById(`ota_live_state_${deviceId}`);
+    const prgEl = document.getElementById(`ota_live_prg_${deviceId}`);
+    const msgEl = document.getElementById(`ota_live_msg_${deviceId}`);
+
+    if (stateEl) stateEl.innerText = msg.state || '-';
+    if (prgEl) {
+        const pct = msg.progress || 0;
+        prgEl.style.width = pct + '%';
+        prgEl.innerText = pct + '%';
+        // Ganti warna berdasarkan state
+        prgEl.className = 'progress-bar progress-bar-striped progress-bar-animated ' +
+            (msg.state === 'success' ? 'bg-success' :
+             msg.state === 'error' ? 'bg-danger' : 'bg-warning');
+    }
+    if (msgEl) msgEl.innerText = msg.msg || '';
+
+    // Refresh list kalau OTA selesai/error (untuk update badge)
+    if (msg.state === 'success' || msg.state === 'error') {
+        setTimeout(() => loadFirmwareList(deviceId), 500);
+    }
+}
+
+// ==== 6. Auto-load list firmware saat tab dibuka ====
+function initOTATabs() {
+    document.querySelectorAll('[id^="firmware-tab-"]').forEach(tabBtn => {
+        tabBtn.addEventListener('shown.bs.tab', function(e) {
+            const targetId = this.id.replace('firmware-tab-', '');
+            loadFirmwareList(targetId);
+        });
+    });
+}
     </script>
 </body>
 </html>

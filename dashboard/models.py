@@ -60,3 +60,58 @@ class RelayState(models.Model):
 
     def __str__(self):
         return f"Relay {self.alat.id_alat} [R1:{self.relay1}, R2:{self.relay2}, R3:{self.relay3}, R4:{self.relay4}, R5:{self.relay5}]"
+    
+# 5. Tabel Firmware OTA (untuk Update via MQTT + URL)
+class Firmware(models.Model):
+    """Firmware binary untuk OTA update."""
+    
+    def firmware_upload_path(instance, filename):
+        return f'firmware/{instance.device_id}/{filename}'
+    
+    device_id = models.CharField(
+        max_length=50, db_index=True,
+        help_text="Target device, harus match Alat.id_alat (mis: ESP32-001)"
+    )
+    version = models.CharField(
+        max_length=32,
+        help_text="Versi firmware, mis: v1.2.0"
+    )
+    file = models.FileField(
+        upload_to=firmware_upload_path,
+        help_text="File .bin hasil build ESP-IDF"
+    )
+    notes = models.TextField(
+        blank=True, null=True,
+        help_text="Catatan rilis (opsional)"
+    )
+    
+    # Tracking OTA
+    STATUS_CHOICES = [
+        ('idle', 'Idle - Siap dikirim'),
+        ('queued', 'Dikirim ke ESP32...'),
+        ('started', 'ESP32 Memulai OTA'),
+        ('downloading', 'Mengunduh Firmware'),
+        ('verifying', 'Verifikasi Firmware'),
+        ('success', 'Berhasil! Menunggu Reboot'),
+        ('error', 'Gagal'),
+    ]
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='idle')
+    progress = models.IntegerField(default=0)
+    last_error = models.CharField(max_length=128, blank=True, null=True)
+    
+    triggered_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-uploaded_at']
+        verbose_name_plural = "Firmware OTA"
+    
+    def __str__(self):
+        return f"{self.device_id} - {self.version}"
+    
+    def file_size_kb(self):
+        try:
+            return round(self.file.size / 1024)
+        except Exception:
+            return 0

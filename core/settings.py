@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -141,4 +142,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+# Batas file OTA adalah 3 MB; beri ruang untuk metadata multipart agar Django
+# tidak menolak request sebelum validasi endpoint dijalankan.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 4 * 1024 * 1024
+
 STATIC_URL = 'static/'
+SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
