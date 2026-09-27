@@ -1,0 +1,11 @@
+dependencies:
+  idf: ">=5.0"
+
+  espressif/ds18b20:
+    version: "^0.4.0"
+  espressif/onewire_bus:
+    version: "^1.1.2"
+  espressif/esp_lcd_ili9341:
+    version: "^2.1.0"
+  espressif/esp_modem:
+    version: "^1.1.0"

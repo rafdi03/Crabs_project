@@ -1,0 +1,56 @@
+idf_component_register(
+    SRCS
+        "application_system/main.c"
+        "application_system/application.c"
+        "application_system/Scheduler.c"
+
+        "communication/COM.c"
+        "communication/ringbuff_com.c"
+        "communication/com_wifi.c"
+        "communication/com_mqtt.c"
+        "communication/com_ota.c"
+        "communication/com_GSM.c"
+        "input/DHT22.c"
+        "input/TempWater.c"       
+        "input/TDS.c"
+        "input/JSN-SR04T.c"
+        "input/DO.c"
+        "input/Relay.c"
+        "input/LCD.c"
+        "input/IoT_Response.c"
+        
+        "input/kalman_filter.c"
+        
+        "input/lcd_draw.c"
+
+    INCLUDE_DIRS
+        "include"
+        "application_system"
+        "communication"
+        "input"
+
+    REQUIRES
+        driver
+        esp_driver_gpio
+        esp_driver_spi
+        esp_driver_i2c
+        esp_driver_uart
+        esp_driver_twai
+        esp_lcd
+        esp_adc
+        esp_timer
+        esp_wifi
+        esp_event
+        esp_netif
+        esp_http_server           
+        esp_ringbuf              
+        nvs_flash
+        mqtt
+        app_update 
+        esp_modem
+        onewire_bus
+        ds18b20
+		esp_lcd_ili9341 
+		esp_http_client    
+        esp_https_ota
+)
