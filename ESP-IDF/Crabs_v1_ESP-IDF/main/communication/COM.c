@@ -166,7 +166,7 @@ static void com_network_task(void *arg) {
 
     /* ---------- 1. WiFi ---------- */
     ESP_LOGI(TAG, ">>> [NET] Mencoba koneksi WiFi...");
-    if (com_wifi_init(NULL, NULL) == ESP_OK) {
+    if (raf_com_wifi_init(NULL, NULL) == ESP_OK) {
         if (com_wifi_wait_connected(CONNECTIVITY_WIFI_TIMEOUT_MS)) {
             s_active_net = COM_NET_WIFI;
             ESP_LOGI(TAG, ">>> [NET] AKTIF: WiFi");
@@ -188,12 +188,12 @@ static void com_network_task(void *arg) {
 
     /* ---------- 2. GSM fallback ---------- */
     ESP_LOGI(TAG, ">>> [NET] Mencoba koneksi GSM (SIM800)...");
-    if (com_gsm_init(NULL, NULL, NULL) == ESP_OK) {
+    if (raf_com_gsm_init(NULL, NULL, NULL) == ESP_OK) {
 
         // IMEI (opsional — khusus operator yang butuh registrasi)
-        com_gsm_set_imei(GSM_IMEI_DEFAULT);
+        raf_com_gsm_set_imei(GSM_IMEI_DEFAULT);
 
-        if (com_gsm_wait_connected(CONNECTIVITY_GSM_TIMEOUT_MS)) {
+        if (raf_com_gsm_wait_connected(CONNECTIVITY_GSM_TIMEOUT_MS)) {
             s_active_net = COM_NET_GSM;
             ESP_LOGI(TAG, ">>> [NET] AKTIF: GSM");
 
@@ -215,12 +215,15 @@ static void com_network_task(void *arg) {
 }
 
 esp_err_t com_network_start(void) {
-    BaseType_t res = xTaskCreate(com_network_task,
-                                 "com_net",
-                                 6144,       // stack size
-                                 NULL,
-                                 5,          // priority
-                                 NULL);
+    BaseType_t res = xTaskCreatePinnedToCore(
+        com_network_task,
+        "com_net",
+        6144,                          // stack size
+        NULL,
+        4,                             // priority
+        NULL,
+        1                              // ← Core 1 (bukan tskNO_AFFINITY)
+    );
     return (res == pdPASS) ? ESP_OK : ESP_FAIL;
 }
 

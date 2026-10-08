@@ -18,7 +18,7 @@
 static const char *TAG = "COM_MQTT";
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_mqtt_connected = false;
-
+static uint32_t s_last_tx_ms = 0;
 /* ========================================================================= */
 static bool parse_state_payload(const char *payload, size_t len) {
     if (payload == NULL || len == 0) return false;
@@ -32,18 +32,19 @@ static bool parse_state_payload(const char *payload, size_t len) {
 void publish_relay_status(void) {
     if (!s_mqtt_connected || s_mqtt_client == NULL) return;
 
+    relay_snapshot_t snap = relay_get_snapshot();
+
     char payload[128];
     snprintf(payload, sizeof(payload),
              "{\"relay1\":%d,\"relay2\":%d,\"relay3\":%d,\"relay4\":%d,\"relay5\":%d}",
-             relay_get(1) ? 1 : 0,
-             relay_get(2) ? 1 : 0,
-             relay_get(3) ? 1 : 0,
-             relay_get(4) ? 1 : 0,
-             relay_get(5) ? 1 : 0);
+             snap.state[0] ? 1 : 0,
+             snap.state[1] ? 1 : 0,
+             snap.state[2] ? 1 : 0,
+             snap.state[3] ? 1 : 0,
+             snap.state[4] ? 1 : 0);
 
     esp_mqtt_client_publish(s_mqtt_client, MQTT_TOPIC_RELAY_STATUS,
                             payload, strlen(payload), 0, 0);
-    ESP_LOGI(TAG, "[RELAY] Status publish -> %s", payload);
 }
 
 /* =========================================================================
@@ -260,9 +261,23 @@ void send_mqtt_json(void) {
         ESP_LOGE(TAG, "Gagal publish sensor");
     } else {
         ESP_LOGI(TAG, "Sensor publish OK (%d bytes)", written);
+		s_last_tx_ms = (uint32_t)(esp_timer_get_time() / 1000);
     }
 }
 
+void com_mqtt_stop(void) {
+    if (s_mqtt_client == NULL) return;
+    ESP_LOGI(TAG, "MQTT stopping...");
+    esp_mqtt_client_stop(s_mqtt_client);
+    esp_mqtt_client_destroy(s_mqtt_client);
+    s_mqtt_client = NULL;
+    s_mqtt_connected = false;
+    ESP_LOGI(TAG, "MQTT stopped");
+}
+
+uint32_t com_mqtt_last_tx_ms(void) {
+    return s_last_tx_ms;
+}
 bool com_mqtt_is_connected(void) {
     return s_mqtt_connected;
 }

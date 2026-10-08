@@ -11,6 +11,12 @@
 #include "esp_err.h"
 #include <stdbool.h>
 
+typedef struct {
+    bool state[5];   // sesuaikan dengan RELAY_COUNT
+} relay_snapshot_t;
+
+relay_snapshot_t relay_get_snapshot(void);
+
 esp_err_t relay_init(void);
 void      relay_set(uint8_t num, bool state);  // num 0 = semua
 bool      relay_get(uint8_t num);              // num 1-5

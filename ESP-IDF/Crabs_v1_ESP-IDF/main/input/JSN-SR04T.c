@@ -54,32 +54,29 @@ esp_err_t jsn_init(void) {
 }
 
 static float jsn_read_raw(void) {
+    // 10us Trigger Pulse
     gpio_set_level(JSN_TRIG_GPIO, 0);
-    esp_rom_delay_us(2);
+    esp_rom_delay_us(4);
     gpio_set_level(JSN_TRIG_GPIO, 1);
-    esp_rom_delay_us(10);
+    esp_rom_delay_us(12);
     gpio_set_level(JSN_TRIG_GPIO, 0);
 
-    portDISABLE_INTERRUPTS();
-
+    // Tunggu awal echo HIGH (timeout 25ms)
     int64_t t0 = esp_timer_get_time();
     while (gpio_get_level(JSN_ECHO_GPIO) == 0) {
-        if ((esp_timer_get_time() - t0) > 30000) {
-            portENABLE_INTERRUPTS();
+        if ((esp_timer_get_time() - t0) > 25000) {
             return -1.0f;
         }
     }
 
+    // Ukur durasi pulsa HIGH (timeout 30ms ~ 5 meter)
     int64_t start = esp_timer_get_time();
     while (gpio_get_level(JSN_ECHO_GPIO) == 1) {
         if ((esp_timer_get_time() - start) > 30000) {
-            portENABLE_INTERRUPTS();
             return -1.0f;
         }
     }
     int64_t dur = esp_timer_get_time() - start;
-
-    portENABLE_INTERRUPTS();
 
     return (dur * 0.0343f) / 2.0f;
 }

@@ -48,22 +48,34 @@ static int hitung_ppm(int adc_raw) {
 }
 
 esp_err_t tds_init(void) {
-    adc_oneshot_unit_init_cfg_t unit_cfg = {
-        .unit_id = ADC_UNIT_1,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &s_adc));
+    /* Pakai ADC1 yang sudah dipakai bersama DO */
+    esp_err_t ret = adc_shared_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC shared init gagal: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    s_adc = adc_shared_get();
+    if (s_adc == NULL) {
+        ESP_LOGE(TAG, "ADC handle NULL");
+        return ESP_FAIL;
+    }
 
     adc_oneshot_chan_cfg_t chan_cfg = {
-        .atten    = ADC_ATTEN_DB_12,	
+        .atten    = TDS_ADC_ATTEN,     // pakai define, konsisten
         .bitwidth = ADC_BITWIDTH_12,
     };
-    s_channel = ADC_CHANNEL_6;   // GPIO 34
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc, s_channel, &chan_cfg));
+    s_channel = TDS_ADC_CHANNEL;       // ADC_CHANNEL_6 (GPIO 34)
+
+    ret = adc_oneshot_config_channel(s_adc, s_channel, &chan_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC channel config gagal: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
     memset(s_buffer, 0, sizeof(s_buffer));
-	
-	kalman1d_init(&s_tds_kalman, 0.01f, 5.0f, 0.0f);
-	
+
+    kalman1d_init(&s_tds_kalman, 0.01f, 5.0f, 0.0f);
+
     s_ready = true;
     ESP_LOGI(TAG, "TDS siap di ADC1_CH6 (GPIO 34)");
     return ESP_OK;

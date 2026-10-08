@@ -10,6 +10,8 @@ idf_component_register(
         "communication/com_mqtt.c"
         "communication/com_ota.c"
         "communication/com_GSM.c"
+        "communication/com_net_manager.c"
+        
         "input/DHT22.c"
         "input/TempWater.c"       
         "input/TDS.c"
@@ -18,11 +20,9 @@ idf_component_register(
         "input/Relay.c"
         "input/LCD.c"
         "input/IoT_Response.c"
-        
-        "input/kalman_filter.c"
-        
+        "input/kalman_filter.c"    
         "input/lcd_draw.c"
-
+		"input/adc_shared.c"
     INCLUDE_DIRS
         "include"
         "application_system"

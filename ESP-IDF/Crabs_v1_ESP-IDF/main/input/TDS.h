@@ -10,6 +10,7 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include "adc_shared.h"  
 
 esp_err_t tds_init(void);
 void      tds_update(void);

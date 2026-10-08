@@ -55,14 +55,13 @@ bool ringbuf_com_send(const void *data, size_t len, uint32_t wait_ms) {
     BaseType_t res = xRingbufferSend(s_comm_ringbuf, data, len, ticks);
 
     if (res == pdTRUE) {
-        s_stats.total_sent++;
+        __atomic_fetch_add(&s_stats.total_sent, 1, __ATOMIC_RELAXED);
         return true;
     } else {
-        s_stats.dropped_packets++;
+        __atomic_fetch_add(&s_stats.dropped_packets, 1, __ATOMIC_RELAXED);
         return false;
     }
 }
-
 bool ringbuf_com_send_from_isr(const void *data, size_t len,
                                BaseType_t *pxHigherPriorityTaskWoken) {
     if (s_comm_ringbuf == NULL || data == NULL || len == 0) {
@@ -90,7 +89,7 @@ void* ringbuf_com_receive(size_t *item_size, uint32_t wait_ms) {
     void *item = xRingbufferReceive(s_comm_ringbuf, item_size, ticks);
 
     if (item != NULL) {
-        s_stats.total_received++;
+        __atomic_fetch_add(&s_stats.total_received, 1, __ATOMIC_RELAXED);
     }
     return item;
 }

@@ -23,18 +23,18 @@
 #include "esp_log.h"
 #include <string.h>
 #include "sdkconfig.h"
-
+#include "com_net_manager.h" 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
  * @brief Inisialisasi stack WiFi Station (STA Mode) dan auto-reconnect.
- * @param ssid Nama WiFi Access Point (jika NULL, gunakan WIFI_SSID_DEFAULT dari main.h).
+ * @param ssid Nama WiFi Access Point (jika NULL, gunakan RAF_COM_WIFI_SSID dari main.h).
  * @param pass Password WiFi (jika NULL, gunakan WIFI_PASS_DEFAULT dari main.h).
  * @return ESP_OK jika inisialisasi berhasil dimulai.
  */
-esp_err_t com_wifi_init(const char *ssid, const char *pass);
+esp_err_t raf_com_wifi_init(const char *ssid, const char *pass);
 
 /**
  * @brief Memeriksa status koneksi WiFi ke Access Point.

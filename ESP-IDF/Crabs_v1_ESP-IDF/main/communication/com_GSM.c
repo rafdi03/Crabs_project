@@ -6,14 +6,6 @@
  */
 
 #include "com_GSM.h"
-#include "main.h"
-#include "esp_log.h"
-#include "esp_modem_api.h"
-#include "esp_netif.h"
-#include "driver/gpio.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include <stdio.h>
 
 static const char *TAG = "COM_GSM";
 
@@ -41,17 +33,17 @@ static void gsm_power_on_sequence(void) {
 }
 
 /* ------------------------------------------------------------------ */
-esp_err_t com_gsm_init(const char *apn, const char *user, const char *pass) {
+esp_err_t raf_com_gsm_init(const char *apn, const char *user, const char *pass) {
     if (s_dce != NULL) return ESP_OK;    // idempotent
 
-    const char *target_apn  = (apn  != NULL) ? apn  : GSM_APN_DEFAULT;
+    const char *target_apn  = (apn  != NULL) ? apn  : RAF_COM_GSM_APN;
 
     // 1. Hardware power-on
     gsm_power_on_sequence();
 
     // 2. DTE (UART) config
     esp_modem_dte_config_t dte_cfg = ESP_MODEM_DTE_DEFAULT_CONFIG();
-    dte_cfg.uart_config.tx_io_num = GSM_PIN_TX;
+    dte_cfg.uart_config.tx_io_num = RAF_COM_GSM_PIN_TX;
     dte_cfg.uart_config.rx_io_num = GSM_PIN_RX;
     dte_cfg.uart_config.rts_io_num = -1;
     dte_cfg.uart_config.cts_io_num = -1;
@@ -88,7 +80,7 @@ esp_err_t com_gsm_init(const char *apn, const char *user, const char *pass) {
 }
 
 /* ------------------------------------------------------------------ */
-esp_err_t com_gsm_set_imei(const char *imei) {
+esp_err_t raf_com_gsm_set_imei(const char *imei) {
     if (s_dce == NULL) return ESP_ERR_INVALID_STATE;
     if (imei == NULL || imei[0] == '\0') return ESP_ERR_INVALID_ARG;
 
@@ -99,7 +91,7 @@ esp_err_t com_gsm_set_imei(const char *imei) {
 }
 
 /* ------------------------------------------------------------------ */
-bool com_gsm_wait_connected(uint32_t timeout_ms) {
+bool raf_com_gsm_wait_connected(uint32_t timeout_ms) {
     if (s_dce == NULL) return false;
 
     ESP_LOGI(TAG, "Menunggu sinyal GSM...");
@@ -130,6 +122,7 @@ bool com_gsm_wait_connected(uint32_t timeout_ms) {
     while (waited < timeout_ms) {
         if (esp_netif_get_ip_info(s_ppp_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
             s_gsm_connected = true;
+			raf_com_net_mgr_notify_gsm(true); 
             ESP_LOGI(TAG, "==================================================");
             ESP_LOGI(TAG, ">>> SUKSES TERHUBUNG VIA GSM (PPP) <<<");
             ESP_LOGI(TAG, ">>> IP Address : " IPSTR, IP2STR(&ip.ip));
@@ -144,9 +137,9 @@ bool com_gsm_wait_connected(uint32_t timeout_ms) {
     return false;
 }
 
-bool com_gsm_is_connected(void) { return s_gsm_connected; }
+bool raf_com_gsm_is_connected(void) { return s_gsm_connected; }
 
-void com_gsm_stop(void) {
+void raf_com_gsm_stop(void) {
     if (s_dce != NULL) {
         esp_modem_set_mode(s_dce, ESP_MODEM_MODE_COMMAND);
         esp_modem_destroy(s_dce);

@@ -14,7 +14,7 @@
 #pragma once
 
 /* ===== WiFi Credentials ===== */
-#define WIFI_SSID_DEFAULT        "LEPTOPAING"
+#define RAF_COM_WIFI_SSID        "LEPTOPAING"
 #define WIFI_PASS_DEFAULT        "BRTMOBILE"
 
 /* ===== WiFi Static IP ===== */
@@ -40,9 +40,9 @@
 #define MQTT_TOPIC_OTA_STATUS    "tambak/" MQTT_DEVICE_ID "/ota/status"
 
 /* ===== GSM ===== */
-#define GSM_APN_DEFAULT          "internet"
+#define RAF_COM_GSM_APN          "internet"
 #define GSM_IMEI_DEFAULT         "864043050823850"
-#define GSM_PIN_TX               26
+#define RAF_COM_GSM_PIN_TX               26
 #define GSM_PIN_RX               27
 #define GSM_PIN_POWER_ON         23
 #define GSM_PIN_RST              5

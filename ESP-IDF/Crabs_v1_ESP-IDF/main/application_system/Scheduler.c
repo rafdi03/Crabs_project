@@ -168,14 +168,10 @@ static void RAF_SchedulerTaskWrapper(void *pvParameters) {
             if (exec_duration_us < slot->min_exec_us) slot->min_exec_us = exec_duration_us;
             if (exec_duration_us > slot->max_exec_us) slot->max_exec_us = exec_duration_us;
 
-            if (slot->config.deadline_ms > 0 &&
-                exec_duration_us > (uint64_t)slot->config.deadline_ms * 1000ULL) {
-                slot->execution_overruns++;
-            }
-
             if (slot->config.deadline_ms > 0) {
-                int64_t deadline_us = expected_us + (int64_t)slot->config.deadline_ms * 1000LL;
-                if (end_time_us > deadline_us) {
+                uint64_t deadline_us = (uint64_t)slot->config.deadline_ms * 1000ULL;
+                if (exec_duration_us > deadline_us) {
+                    slot->execution_overruns++;
                     slot->deadline_misses++;
                 }
             }
@@ -196,11 +192,13 @@ static void RAF_SchedulerTaskWrapper(void *pvParameters) {
 
         TickType_t now = xTaskGetTickCount();
         TickType_t elapsed = now - tick_before;
-        if (elapsed > xFrequency) {
-            uint32_t missed = elapsed / xFrequency;
-            xSemaphoreTake(slot->lock, portMAX_DELAY);
-            slot->missed_periods += missed;
-            xSemaphoreGive(slot->lock);
+        if (elapsed > (xFrequency + (xFrequency / 2))) {
+            uint32_t missed = (elapsed - xFrequency) / xFrequency;
+            if (missed > 0) {
+                xSemaphoreTake(slot->lock, portMAX_DELAY);
+                slot->missed_periods += missed;
+                xSemaphoreGive(slot->lock);
+            }
         }
     }
 }

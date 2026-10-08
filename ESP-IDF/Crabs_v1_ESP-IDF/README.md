@@ -539,7 +539,7 @@ I2C defaults to 400 kHz for the IMU and LCD. Confirm voltage, pull-ups, address 
 Edit `main/include/main.h` for local defaults:
 
 ```c
-#define WIFI_SSID_DEFAULT       "your-ssid"
+#define RAF_COM_WIFI_SSID       "your-ssid"
 #define WIFI_PASS_DEFAULT       "your-password"
 #define MQTT_BROKER_URI_DEFAULT "mqtt://broker.example:1883"
 #define MQTT_CLIENT_ID_DEFAULT  "ESP32_NODE"

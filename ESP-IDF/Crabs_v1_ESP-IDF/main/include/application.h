@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "com_net_manager.h"
 #include "modules_config.h"
 #include "DHT22.h"
 #include "TempWater.h"
