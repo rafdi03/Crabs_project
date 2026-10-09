@@ -42,8 +42,8 @@
 /* ===== GSM ===== */
 #define RAF_COM_GSM_APN          "internet"
 #define GSM_IMEI_DEFAULT         "864043050823850"
-#define RAF_COM_GSM_PIN_TX               26
-#define GSM_PIN_RX               27
+#define RAF_COM_GSM_PIN_TX       27      
+#define GSM_PIN_RX               26      
 #define GSM_PIN_POWER_ON         23
 #define GSM_PIN_RST              5
 #define GSM_PIN_PWKEY            4

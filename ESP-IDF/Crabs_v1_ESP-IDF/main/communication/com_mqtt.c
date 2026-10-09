@@ -3,6 +3,8 @@
  *
  *  Created on: 14 Sept 2026
  *      Author: Rafdi
+ *
+ *  Tambahan: tracking waktu disconnect untuk recovery dari net_mgr.
  */
 
 #include "com_mqtt.h"
@@ -17,8 +19,10 @@
 
 static const char *TAG = "COM_MQTT";
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
-static bool s_mqtt_connected = false;
-static uint32_t s_last_tx_ms = 0;
+static bool     s_mqtt_connected     = false;
+static uint32_t s_last_tx_ms         = 0;
+static int64_t  s_last_disconnect_us = 0;   /* ⭐ waktu disconnect terakhir */
+
 /* ========================================================================= */
 static bool parse_state_payload(const char *payload, size_t len) {
     if (payload == NULL || len == 0) return false;
@@ -48,16 +52,14 @@ void publish_relay_status(void) {
 }
 
 /* =========================================================================
- * Handle incoming MQTT data (relay command + OTA URL)
+ * Handle incoming MQTT data
  * ========================================================================= */
 static void handle_mqtt_data(const char *topic, int topic_len,
                              const char *data, int data_len) {
-    /* Topic buffer */
     char topic_buf[160] = {0};
     if (topic_len >= (int)sizeof(topic_buf)) return;
     memcpy(topic_buf, topic, topic_len);
 
-    /* Payload buffer — 512 cukup untuk URL firmware */
     char data_buf[512] = {0};
     int copy_len = (data_len < (int)sizeof(data_buf) - 1)
                    ? data_len : (int)sizeof(data_buf) - 1;
@@ -65,7 +67,7 @@ static void handle_mqtt_data(const char *topic, int topic_len,
 
     ESP_LOGI(TAG, "[MQTT RX] Topic: %s | Payload: %s", topic_buf, data_buf);
 
-    /* ---- 1. OTA URL (CEK PALING AWAL sebelum filter /status) ---- */
+    /* ---- 1. OTA URL ---- */
     if (strncmp(topic_buf, MQTT_TOPIC_OTA_URL,
                 strlen(MQTT_TOPIC_OTA_URL)) == 0) {
         ESP_LOGW(TAG, "[OTA] URL diterima: %s", data_buf);
@@ -73,7 +75,7 @@ static void handle_mqtt_data(const char *topic, int topic_len,
         return;
     }
 
-    /* ---- 2. Filter topik status (mencegah echo loop) ---- */
+    /* ---- 2. Filter topik status ---- */
     if (strstr(topic_buf, "/status") != NULL) return;
 
     /* ---- 3. Relay all ---- */
@@ -109,7 +111,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-        s_mqtt_connected = true;
+        s_mqtt_connected     = true;
+        s_last_disconnect_us = 0;   /* ⭐ reset timer disconnect */
+
         ESP_LOGI(TAG, "==================================================");
         ESP_LOGI(TAG, ">>> MQTT CONNECTED <<<");
         ESP_LOGI(TAG, ">>> Device ID : %s", MQTT_DEVICE_ID);
@@ -128,6 +132,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
 
     case MQTT_EVENT_DISCONNECTED:
         s_mqtt_connected = false;
+        if (s_last_disconnect_us == 0) {
+            s_last_disconnect_us = esp_timer_get_time();  /* ⭐ catat waktu */
+        }
         ESP_LOGW(TAG, "Terputus dari broker MQTT");
         break;
 
@@ -141,6 +148,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_ERROR:
+        /* ⭐ Kalau belum connected dan belum ada timestamp → catat */
+        if (!s_mqtt_connected && s_last_disconnect_us == 0) {
+            s_last_disconnect_us = esp_timer_get_time();
+        }
         ESP_LOGE(TAG, "Error pada client MQTT");
         break;
 
@@ -162,6 +173,7 @@ esp_err_t com_mqtt_init(const char *broker_uri, const char *client_id) {
         .broker.address.uri    = uri,
         .credentials.client_id = cid,
         .session.keepalive     = 60,
+        .network.reconnect_timeout_ms = 5000,
     };
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -186,7 +198,7 @@ esp_err_t com_mqtt_init(const char *broker_uri, const char *client_id) {
 }
 
 /* =========================================================================
- * Publish ke topik response default (Com Hub responses)
+ * Publish
  * ========================================================================= */
 esp_err_t com_mqtt_publish(const void *data, size_t len) {
     if (s_mqtt_client == NULL || !s_mqtt_connected) {
@@ -204,9 +216,6 @@ esp_err_t com_mqtt_publish(const void *data, size_t len) {
     return ESP_OK;
 }
 
-/* =========================================================================
- * Publish ke topik custom (raw) — dipakai OTA status
- * ========================================================================= */
 esp_err_t com_mqtt_publish_raw(const char *topic, const void *data, size_t len) {
     if (s_mqtt_client == NULL || !s_mqtt_connected) {
         return ESP_ERR_INVALID_STATE;
@@ -219,9 +228,6 @@ esp_err_t com_mqtt_publish_raw(const char *topic, const void *data, size_t len) 
     return (msg_id >= 0) ? ESP_OK : ESP_FAIL;
 }
 
-/* =========================================================================
- * Publish data sensor
- * ========================================================================= */
 void send_mqtt_json(void) {
     if (!s_mqtt_connected || s_mqtt_client == NULL) return;
 
@@ -261,7 +267,7 @@ void send_mqtt_json(void) {
         ESP_LOGE(TAG, "Gagal publish sensor");
     } else {
         ESP_LOGI(TAG, "Sensor publish OK (%d bytes)", written);
-		s_last_tx_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        s_last_tx_ms = (uint32_t)(esp_timer_get_time() / 1000);
     }
 }
 
@@ -272,12 +278,23 @@ void com_mqtt_stop(void) {
     esp_mqtt_client_destroy(s_mqtt_client);
     s_mqtt_client = NULL;
     s_mqtt_connected = false;
+    s_last_disconnect_us = 0;
     ESP_LOGI(TAG, "MQTT stopped");
 }
 
 uint32_t com_mqtt_last_tx_ms(void) {
     return s_last_tx_ms;
 }
+
 bool com_mqtt_is_connected(void) {
     return s_mqtt_connected;
+}
+
+/* ⭐ Fungsi baru untuk net_mgr monitoring */
+int64_t com_mqtt_last_disconnect_us(void) {
+    return s_last_disconnect_us;
+}
+
+bool com_mqtt_is_reconnecting(void) {
+    return (s_mqtt_client != NULL && !s_mqtt_connected);
 }

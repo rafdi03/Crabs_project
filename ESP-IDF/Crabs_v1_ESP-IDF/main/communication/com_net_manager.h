@@ -1,13 +1,3 @@
-/*
- * com_net_manager.h
- *
- *  Created on: 29 Sept 2026
- *      Author: Rafdi
- *
- * Network Manager — State machine dengan WiFi-priority, GSM fallback,
- * runtime monitoring, dan auto-reboot saat kedua network down.
- */
-
 #ifndef MAIN_COMMUNICATION_COM_NET_MANAGER_H_
 #define MAIN_COMMUNICATION_COM_NET_MANAGER_H_
 
@@ -23,46 +13,24 @@ extern "C" {
 /* ============================================================
  * Timing Configuration
  * ============================================================ */
-#define NET_MGR_BOOT_TIMEOUT_MS       20000   /* 30s: boot coba WiFi/GSM     */
-#define NET_MGR_RUNTIME_DROP_MS       20000   /* 30s: tunggu reconnect runtime */
-#define NET_MGR_FALLBACK_TIMEOUT_MS   20000   /* 20s: per attempt fallback    */
-#define NET_MGR_FALLBACK_MAX_CYCLES   2       /* 5 cycles → reboot            */
-#define NET_MGR_TICK_MS               1000    /* Polling interval 1s          */
+#define NET_MGR_WIFI_BOOT_TIMEOUT_MS  10000      /* 10s — WiFi cuma awal   */
+#define NET_MGR_GSM_BOOT_TIMEOUT_MS   300000     /* 5 menit — sinyal susah */
+#define NET_MGR_GSM_DROP_WAIT_MS      30000      /* 30s — tunggu GSM reconn */
+#define NET_MGR_TICK_MS               1000
+#define NET_MGR_MAX_GSM_RETRY         3
 
-/* Reboot guard — hindari reboot loop */
-#define NET_MGR_REBOOT_GUARD_COUNT    3       /* 3 reboot dalam window → skip WiFi */
-#define NET_MGR_REBOOT_GUARD_WINDOW_S 600     /* 10 menit                     */
+/* Reboot guard */
+#define NET_MGR_REBOOT_GUARD_COUNT    3
+#define NET_MGR_REBOOT_GUARD_WINDOW_S 600
 
 /* ============================================================
  * Public API
  * ============================================================ */
-
-/**
- * @brief Start network manager task.
- *        Menggantikan com_network_start() lama.
- */
 esp_err_t com_net_manager_start(void);
-
-/**
- * @brief Query active network interface.
- */
 com_net_iface_t com_net_manager_get_active(void);
-
-/**
- * @brief Query active network name: "WiFi" / "GSM" / "NONE".
- */
 const char* com_net_manager_get_active_name(void);
 
-/**
- * @brief Callback dari WiFi layer saat status koneksi berubah.
- *        Dipanggil dari com_wifi.c event handler.
- */
 void raf_com_net_mgr_notify_wifi(bool connected);
-
-/**
- * @brief Callback dari GSM layer saat status koneksi berubah.
- *        Dipanggil dari com_GSM.c setelah IP didapat.
- */
 void raf_com_net_mgr_notify_gsm(bool connected);
 
 #ifdef __cplusplus

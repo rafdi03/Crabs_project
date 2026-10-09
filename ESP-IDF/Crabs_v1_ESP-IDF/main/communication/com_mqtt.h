@@ -37,8 +37,13 @@ esp_err_t com_mqtt_publish_raw(const char *topic, const void *data, size_t len);
 void      send_mqtt_json(void);
 void      publish_relay_status(void);
 bool      com_mqtt_is_connected(void);
-uint32_t com_mqtt_last_tx_ms(void);
-void com_mqtt_stop(void);
+uint32_t  com_mqtt_last_tx_ms(void);
+void      com_mqtt_stop(void);
+
+/* ⭐ Baru — untuk monitoring & recovery dari net_mgr */
+int64_t   com_mqtt_last_disconnect_us(void);
+bool      com_mqtt_is_reconnecting(void);
+
 #ifdef __cplusplus
 }
 #endif
